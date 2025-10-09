@@ -14,7 +14,7 @@
 
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
-#define DIMENSIONALITY 3
+#define DIMENSIONALITY 2
 static constexpr int8_t dimensionality = DIMENSIONALITY;
 
 struct X {
@@ -85,10 +85,6 @@ using DVectXY = ddc::DiscreteVector<DDimX, DDimY>;
 using DDomXY = ddc::DiscreteDomain<DDimX, DDimY>;
 using SDDomXY = ddc::StridedDiscreteDomain<DDimX, DDimY>;
 
-
-DElemX constexpr lbound_x = ddc::init_trivial_half_bounded_space<DDimX>();
-DElemY constexpr lbound_y = ddc::init_trivial_half_bounded_space<DDimY>();
-
 #if DIMENSIONALITY > 2
 using DElemXYZ = ddc::DiscreteElement<DDimX, DDimY, DDimZ>;
 using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
@@ -105,8 +101,9 @@ using DVect = DVectXYZ;
 using DDom = DDomXYZ;
 using SDDom = SDDomXYZ;
 
-DElemZ constexpr lbound_z = ddc::init_trivial_half_bounded_space<DDimZ>();
-DElem constexpr lbound_all(lbound_x, lbound_y, lbound_z);
+// DElemZ constexpr lbound_z = ddc::init_trivial_half_bounded_space<DDimZ>();
+// DElem constexpr lbound_all(lbound_x, lbound_y, lbound_z);
+DElem constexpr lbound_all(0,0,0);
 
 #else // DIMENSIONALITY > 2
 
@@ -115,7 +112,8 @@ using DVect = DVectXY;
 using DDom = DDomXY;
 using SDDom = SDDomXY;
 
-DElem constexpr lbound_all(lbound_x, lbound_y);
+// DElem constexpr lbound_all(lbound_x, lbound_y);
+DElem constexpr lbound_all(0,0);
 
 #endif // DIMENSIONALITY > 2
 
@@ -143,7 +141,7 @@ SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, st
 
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span, std::string const& filename){
-    std::ofstream file(filename, std::ios::app | std::ios::binary);
+    std::ofstream file(filename, std::ios::trunc | std::ios::binary);
     auto chunk_size = span.size();
     for (auto i = 0; i < chunk_size; ++i) {
         file.write(reinterpret_cast<char*>(&span.data_handle()[i]), sizeof(span.data_handle()[i]));
@@ -155,7 +153,11 @@ int main(int argc, char* argv[])
     Kokkos::ScopeGuard const kokkos_scope;
     ddc::ScopeGuard const ddc_scope;
 
+#if DIMENSIONALITY > 2
     std::array<int, dimensionality> const maximum_level = {5, 6, 7};
+#else
+    std::array<int, dimensionality> const maximum_level = {4, 5};
+#endif
     std::array<long int, dimensionality> resolution;
     std::transform(
         maximum_level.begin(), maximum_level.end(), resolution.begin(), [](int ml) { return (1 << ml) + 1; });
@@ -181,35 +183,45 @@ int main(int argc, char* argv[])
             ddc::DiscreteVector<DDimZ>(resolution[2] + 1)));
     ddc::DiscreteDomain<DDimZ> const z_domain
             = z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
+
+    DDom const dom_all(x_domain, y_domain, z_domain);
+#else
+    DDom const dom_all(x_domain, y_domain);
 #endif
 
-    DDom const dom_all(lbound_all, resolution_all);
-    
+# if DIMENSIONALITY > 2
     std::array<int, dimensionality> const minimum_level = {4, 5, 6};
-
     std::vector<std::array<int, dimensionality>> all_levels = {{4,6,7}, {5,5,7}, {5,6,6}, {4,5,6}};
     std::vector<int> all_combi_coefficients = {1, 1, 1, -2};
-    std::vector<SDDom> strided_domains;
+# else
+    std::array<int, dimensionality> const minimum_level = {2, 3};
+    std::vector<std::array<int, dimensionality>> all_levels = {{2,5}, {3,4}, {4,3}, {2,4}, {3,3}};
+    std::vector<int> all_combi_coefficients = {1, 1, 1, -1, -1};
+# endif
+    std::vector<SDDom> component_grid_domains;
     //TODO these as Kokkos unordered_map?
     std::vector<ddc::Chunk<double, SDDom>> level_data;
     
     for (int grid_index = 0; grid_index < all_levels.size(); ++ grid_index){
         auto& level = all_levels[grid_index];
-        auto& coefficient = all_combi_coefficients[grid_index];
-        strided_domains.emplace_back(strided_domain_from_level(level, maximum_level));
+        component_grid_domains.emplace_back(strided_domain_from_level(level, maximum_level));
         level_data.emplace_back(ddc::Chunk(
-            "strided_grid_" + std::to_string(grid_index), strided_domains.back(),
+            "strided_grid_" + std::to_string(grid_index), component_grid_domains.back(),
             ddc::DeviceAllocator<double>()));
         auto strided_grid = level_data.back().span_view();
         
         // initialize!
         ddc::parallel_for_each(
-            strided_domains.back(),
-            KOKKOS_LAMBDA(DElemXYZ const ixyz) {
+            component_grid_domains.back(),
+            KOKKOS_LAMBDA(DElem const ixyz) {
                 double const x = ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
                 double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
+                #if DIMENSIONALITY > 2
                 double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
                 strided_grid(ixyz) = std::cos(3.0 + (x + y + z));
+                #else
+                strided_grid(ixyz) = std::cos(3.0 + (x + y));
+                #endif
             });
 
         //TODO how easiest for visualizable output? pdi? raw ofstream? (-> raw ofstream for now)
