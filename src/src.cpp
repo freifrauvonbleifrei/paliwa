@@ -141,6 +141,15 @@ SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, st
     return SDDom(lbound_all, resolution_all, strides_all);
 }
 
+template <typename ChunkType>
+void dump_chunk_span_to_binary_file(ChunkType const span, std::string const& filename){
+    std::ofstream file(filename, std::ios::app | std::ios::binary);
+    auto chunk_size = span.size();
+    for (auto i = 0; i < chunk_size; ++i) {
+        file.write(reinterpret_cast<char*>(&span.data_handle()[i]), sizeof(span.data_handle()[i]));
+    }
+}
+
 int main(int argc, char* argv[])
 {
     Kokkos::ScopeGuard const kokkos_scope;
@@ -202,9 +211,13 @@ int main(int argc, char* argv[])
                 double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
                 strided_grid(ixyz) = std::cos(3.0 + (x + y + z));
             });
-        // ddc::parallel_fill(strided_grid, 2.5);
 
-        //TODO how easiest for visualizable output? pdi? raw ofstream?
+        //TODO how easiest for visualizable output? pdi? raw ofstream? (-> raw ofstream for now)
+        std::string level_str = "";
+        for (auto l : level) { level_str += std::to_string(l) + "_"; }
+        level_str += std::to_string(dimensionality) + "d";
+        std::string const filename = "strided_grid_" + level_str + ".raw";
+        dump_chunk_span_to_binary_file(strided_grid, filename);
         // std::cout << strided_grid << std::endl; (-> issue)
         ddc::print_content(std::cout, strided_grid) << std::endl;
     }
