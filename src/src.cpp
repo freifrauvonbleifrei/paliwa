@@ -127,16 +127,17 @@ double const z_start = 0.;
 double const z_end = 1.;
 
 SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, std::array<int, dimensionality> const& finest_level) {
-    std::vector<long int> resolution;
-    std::ranges::transform(finest_level, std::back_inserter(resolution), [](int ml) { return (1 << ml) + 1; });
-    DVect const resolution_all(resolution[0], resolution[1], resolution[2]); //TODO elegant assignment? range? iterators?
+    std::array<long int, dimensionality> resolution;
+    std::ranges::transform(finest_level, resolution.begin(), [](int ml) { return (1 << ml) + 1; });
+    DVect resolution_all;
+    ddc::detail::array(resolution_all) = resolution; //TODO temporary solution until assignment from std::array is implemented
 
-    std::array<int, dimensionality> const level_diff = {finest_level[0] - level[0],
-                                         finest_level[1] - level[1],
-                                         finest_level[2] - level[2]};
-    std::array<int, dimensionality> stride;
+    std::array<int, dimensionality> level_diff;
+    std::ranges::transform(level, finest_level, level_diff.begin(), [](int l, int ml) { return ml - l; });
+    std::array<long int, dimensionality> stride;
     std::ranges::transform(level_diff, stride.begin(), [](int l) { return (1 << l); });
-    DVect const strides_all(stride[0], stride[1], stride[2]); //TODO elegant assignment? range? iterators?
+    DVect strides_all;
+    ddc::detail::array(strides_all) = stride; //TODO 
     return SDDom(lbound_all, resolution_all, strides_all);
 }
 
@@ -149,7 +150,8 @@ int main(int argc, char* argv[])
     std::array<long int, dimensionality> resolution;
     std::transform(
         maximum_level.begin(), maximum_level.end(), resolution.begin(), [](int ml) { return (1 << ml) + 1; });
-    DVect const resolution_xyz(resolution[0], resolution[1], resolution[2]);
+    DVect resolution_all;
+    ddc::detail::array(resolution_all) = resolution; //TODO temporary solution until assignment from std::array is implemented
     // discrete domain in 3d, for the full grid but not allocated yet
     auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(DDimX::init<DDimX>(
             ddc::Coordinate<X>(x_start),
@@ -163,14 +165,16 @@ int main(int argc, char* argv[])
             ddc::DiscreteVector<DDimY>(resolution[1] + 1)));
     ddc::DiscreteDomain<DDimY> const y_domain
             = y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
+#if DIMENSIONALITY > 2
     auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(DDimZ::init<DDimZ>(
             ddc::Coordinate<Z>(z_start),
             ddc::Coordinate<Z>(z_end),
             ddc::DiscreteVector<DDimZ>(resolution[2] + 1)));
     ddc::DiscreteDomain<DDimZ> const z_domain
             = z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
+#endif
 
-    DDom const dom_all(lbound_all, resolution_xyz);
+    DDom const dom_all(lbound_all, resolution_all);
     
     std::array<int, dimensionality> const minimum_level = {4, 5, 6};
 
