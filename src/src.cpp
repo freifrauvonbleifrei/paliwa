@@ -8,39 +8,88 @@
 #include <vector>
 
 #include <ddc/ddc.hpp>
-// #include <ddc/kernels/splines.hpp>
+#include <ddc/kernels/splines.hpp>
 
 #include <Kokkos_Core.hpp>
 
-struct X {};
+#define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
-// struct DDimX : ddc::UniformBSplines<X, 1>
-// {
-// };
-struct DDimX : ddc::UniformPointSampling<X>
+#define DIMENSIONALITY 3
+static constexpr int8_t dimensionality = DIMENSIONALITY;
+
+struct X {
+#if defined(PERIODIC_DOMAIN)
+    static constexpr bool PERIODIC = true;
+#else
+    static constexpr bool PERIODIC = false;
+#endif
+};
+struct Y {
+#if defined(PERIODIC_DOMAIN)
+    static constexpr bool PERIODIC = true;
+#else
+    static constexpr bool PERIODIC = false;
+#endif
+};
+#if DIMENSIONALITY > 2
+struct Z {
+#if defined(PERIODIC_DOMAIN)
+    static constexpr bool PERIODIC = true;
+#else
+    static constexpr bool PERIODIC = false;
+#endif
+};
+#endif
+
+#if defined(PERIODIC_DOMAIN)
+static constexpr ddc::BoundCond BoundCond = ddc::BoundCond::PERIODIC;
+template <class DDim>
+using ExtrapolationRule = ddc::PeriodicExtrapolationRule<DDim>;
+#else
+static constexpr ddc::BoundCond BoundCond = ddc::BoundCond::GREVILLE;
+template <class DDim>
+using ExtrapolationRule = ddc::NullExtrapolationRule;
+#endif
+
+template <class DDim>
+using GrevillePoints = ddc::GrevilleInterpolationPoints<ddc::UniformBSplines<DDim, 1>, BoundCond, BoundCond>;
+struct DDimX : GrevillePoints<X>::interpolation_discrete_dimension_type
 {
 };
+// struct DDimX : ddc::UniformPointSampling<X>
+// {
+// };
 using DElemX = ddc::DiscreteElement<DDimX>;
 using DVectX = ddc::DiscreteVector<DDimX>;
 using DDomX = ddc::StridedDiscreteDomain<DDimX>;
 
 
-struct Y {};
-struct DDimY : ddc::UniformPointSampling<Y>
+struct DDimY : GrevillePoints<Y>::interpolation_discrete_dimension_type
 {
 };
 using DElemY = ddc::DiscreteElement<DDimY>;
 using DVectY = ddc::DiscreteVector<DDimY>;
 using DDomY = ddc::StridedDiscreteDomain<DDimY>;
 
-struct Z {};
-struct DDimZ : ddc::UniformPointSampling<Z>
+#if DIMENSIONALITY > 2
+struct DDimZ : GrevillePoints<Z>::interpolation_discrete_dimension_type
 {
 };
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 using DVectZ = ddc::DiscreteVector<DDimZ>;
 using DDomZ = ddc::StridedDiscreteDomain<DDimZ>;
+#endif
 
+using DElemXY = ddc::DiscreteElement<DDimX, DDimY>;
+using DVectXY = ddc::DiscreteVector<DDimX, DDimY>;
+using DDomXY = ddc::DiscreteDomain<DDimX, DDimY>;
+using SDDomXY = ddc::StridedDiscreteDomain<DDimX, DDimY>;
+
+
+DElemX constexpr lbound_x = ddc::init_trivial_half_bounded_space<DDimX>();
+DElemY constexpr lbound_y = ddc::init_trivial_half_bounded_space<DDimY>();
+
+#if DIMENSIONALITY > 2
 using DElemXYZ = ddc::DiscreteElement<DDimX, DDimY, DDimZ>;
 using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
 using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
@@ -51,10 +100,24 @@ using DVectZYX = ddc::DiscreteVector<DDimZ, DDimY, DDimX>;
 using DDomZYX = ddc::DiscreteDomain<DDimZ, DDimY, DDimX>;
 using SDDomZYX = ddc::StridedDiscreteDomain<DDimZ, DDimY, DDimX>;
 
-DElemX constexpr lbound_x = ddc::init_trivial_half_bounded_space<DDimX>();
-DElemY constexpr lbound_y = ddc::init_trivial_half_bounded_space<DDimY>();
+using DElem = DElemXYZ;
+using DVect = DVectXYZ;
+using DDom = DDomXYZ;
+using SDDom = SDDomXYZ;
+
 DElemZ constexpr lbound_z = ddc::init_trivial_half_bounded_space<DDimZ>();
-DElemXYZ constexpr lbound_x_y_z(lbound_x, lbound_y, lbound_z);
+DElem constexpr lbound_all(lbound_x, lbound_y, lbound_z);
+
+#else // DIMENSIONALITY > 2
+
+using DElem = DElemXY;
+using DVect = DVectXY;
+using DDom = DDomXY;
+using SDDom = SDDomXY;
+
+DElem constexpr lbound_all(lbound_x, lbound_y);
+
+#endif // DIMENSIONALITY > 2
 
 double const x_start = 0.;
 double const x_end = 1.;
@@ -63,18 +126,18 @@ double const y_end = 1.;
 double const z_start = 0.;
 double const z_end = 1.;
 
-SDDomXYZ strided_domain_from_level(std::vector<int> const& level, std::vector<int> const& finest_level) {
+SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, std::array<int, dimensionality> const& finest_level) {
     std::vector<long int> resolution;
     std::ranges::transform(finest_level, std::back_inserter(resolution), [](int ml) { return (1 << ml) + 1; });
-    DVectXYZ const resolution_xyz(resolution[0], resolution[1], resolution[2]);
+    DVect const resolution_all(resolution[0], resolution[1], resolution[2]); //TODO elegant assignment? range? iterators?
 
-    std::vector<int> const level_diff = {finest_level[0] - level[0],
+    std::array<int, dimensionality> const level_diff = {finest_level[0] - level[0],
                                          finest_level[1] - level[1],
                                          finest_level[2] - level[2]};
-    std::vector<int> stride;
-    std::ranges::transform(level_diff, std::back_inserter(stride), [](int l) { return (1 << l); });
-    DVectXYZ const strides_xyz(stride[0], stride[1], stride[2]);
-    return SDDomXYZ(lbound_x_y_z, resolution_xyz, strides_xyz);
+    std::array<int, dimensionality> stride;
+    std::ranges::transform(level_diff, stride.begin(), [](int l) { return (1 << l); });
+    DVect const strides_all(stride[0], stride[1], stride[2]); //TODO elegant assignment? range? iterators?
+    return SDDom(lbound_all, resolution_all, strides_all);
 }
 
 int main(int argc, char* argv[])
@@ -82,11 +145,11 @@ int main(int argc, char* argv[])
     Kokkos::ScopeGuard const kokkos_scope;
     ddc::ScopeGuard const ddc_scope;
 
-    std::vector<int> const maximum_level = {5, 6, 7};
-    std::vector<long int> resolution;
+    std::array<int, dimensionality> const maximum_level = {5, 6, 7};
+    std::array<long int, dimensionality> resolution;
     std::transform(
-        maximum_level.begin(), maximum_level.end(), std::back_inserter(resolution), [](int ml) { return (1 << ml) + 1; });
-    DVectXYZ const resolution_xyz(resolution[0], resolution[1], resolution[2]);
+        maximum_level.begin(), maximum_level.end(), resolution.begin(), [](int ml) { return (1 << ml) + 1; });
+    DVect const resolution_xyz(resolution[0], resolution[1], resolution[2]);
     // discrete domain in 3d, for the full grid but not allocated yet
     auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(DDimX::init<DDimX>(
             ddc::Coordinate<X>(x_start),
@@ -107,15 +170,15 @@ int main(int argc, char* argv[])
     ddc::DiscreteDomain<DDimZ> const z_domain
             = z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
 
-    DDomXYZ const dom_x_y_z(lbound_x_y_z, resolution_xyz);
+    DDom const dom_all(lbound_all, resolution_xyz);
     
+    std::array<int, dimensionality> const minimum_level = {4, 5, 6};
 
-    std::vector<int> const minimum_level = {4, 5, 6};
-
-    std::vector<std::vector<int>> all_levels = {{4,6,7}, {5,5,7}, {5,6,6}, {4,5,6}};
+    std::vector<std::array<int, dimensionality>> all_levels = {{4,6,7}, {5,5,7}, {5,6,6}, {4,5,6}};
     std::vector<int> all_combi_coefficients = {1, 1, 1, -2};
-    std::vector<SDDomXYZ> strided_domains;
-    std::vector<ddc::Chunk<double, SDDomXYZ>> level_data;
+    std::vector<SDDom> strided_domains;
+    //TODO these as Kokkos unordered_map?
+    std::vector<ddc::Chunk<double, SDDom>> level_data;
     
     for (int grid_index = 0; grid_index < all_levels.size(); ++ grid_index){
         auto& level = all_levels[grid_index];
