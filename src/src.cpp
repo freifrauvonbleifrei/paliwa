@@ -140,22 +140,102 @@ SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, st
 }
 
 template <typename DDimInWhichItsOdd>
-SDDom odd_strided_domain_from_domain(SDDom const& domain) {
-    ddc::DiscreteVector<DDimInWhichItsOdd> odd_offset(domain.strides().get<DDimInWhichItsOdd>());
-    DVect strides_odd = domain.strides();
-    strides_odd.get<DDimInWhichItsOdd>() *= 2;
-    auto extent_odd = domain.extents();
-    extent_odd.get<DDimInWhichItsOdd>() = (extent_odd.get<DDimInWhichItsOdd>()) / 2;
-    return SDDom(lbound_all + odd_offset, extent_odd, strides_odd);
+SDDom odd_strided_domain_from_domain(SDDom const &domain) {
+  ddc::DiscreteVector<DDimInWhichItsOdd> odd_offset(
+      domain.strides().get<DDimInWhichItsOdd>());
+  DVect strides_odd = domain.strides();
+  strides_odd.get<DDimInWhichItsOdd>() *= 2;
+  auto extent_odd = domain.extents();
+  extent_odd.get<DDimInWhichItsOdd>() =
+      (extent_odd.get<DDimInWhichItsOdd>()) / 2;
+  return SDDom(lbound_all + odd_offset, extent_odd, strides_odd);
 }
 
 template <typename DDimInWhichItsEven>
-SDDom even_strided_domain_from_domain(SDDom const& domain) {
-    DVect strides_even = domain.strides();
-    strides_even.get<DDimInWhichItsEven>() *= 2;
-    auto extent_even = domain.extents();
-    extent_even.get<DDimInWhichItsEven>() = (extent_even.get<DDimInWhichItsEven>()) / 2;
-    return SDDom(lbound_all, extent_even, strides_even);
+SDDom even_strided_domain_from_domain(SDDom const &domain) {
+  DVect strides_even = domain.strides();
+  strides_even.get<DDimInWhichItsEven>() *= 2;
+  auto extent_even = domain.extents();
+  extent_even.get<DDimInWhichItsEven>() =
+      (extent_even.get<DDimInWhichItsEven>()) / 2;
+  return SDDom(lbound_all, extent_even, strides_even);
+}
+
+template <typename DDimInWhichToHierarchize>
+void hierarchize_in_direction(
+    SDDom const &strided_domain,
+    ddc::ChunkSpan<double, SDDom> const strided_grid,
+    std::array<long int, dimensionality> const &level,
+    std::array<long int, dimensionality> const &minimum_level,
+    std::array<long int, dimensionality> const &maximum_level) {
+  DVect ddc_level, ddc_max_level, ddc_min_level;
+  ddc::detail::array(ddc_level) = level; // TODO temporary solution until
+                                         // assignment from std::array is
+                                         // implemented
+  ddc::detail::array(ddc_max_level) = maximum_level;
+  ddc::detail::array(ddc_min_level) = minimum_level;
+  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_level_1d_vec(
+      ddc_level);
+  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_max_level_1d_vec(
+      ddc_max_level);
+  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_min_level_1d_vec(
+      ddc_min_level);
+
+  // the finest stride
+  assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
+         strided_domain.strides().get<DDimInWhichToHierarchize>());
+
+  std::array<double, 3> const odd_filter = {-0.5, 1.0, -0.5};
+  auto odd_strided_domain =
+      odd_strided_domain_from_domain<DDimInWhichToHierarchize>(strided_domain);
+  for (long int current_level = ddc_level_1d_vec;
+       current_level > ddc_min_level_1d_vec; --current_level) {
+    int const current_stride = (1 << (ddc_max_level_1d_vec - current_level));
+    int const next_coarser_stride = current_stride << 1;
+    ddc::parallel_for_each(
+        odd_strided_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+          // how to access / slice at every other point in x?
+          // check for out of bounds
+          if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
+                  ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                      current_stride) <=
+              ddc::DiscreteElement<DDimInWhichToHierarchize>(
+                  odd_strided_domain.back())) {
+            strided_grid(ixyz) =
+                odd_filter[0] *
+                    strided_grid(ixyz -
+                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                                     current_stride)) +
+                odd_filter[1] * strided_grid(ixyz) +
+                odd_filter[2] *
+                    strided_grid(ixyz +
+                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                                     current_stride));
+          } else {
+            // on the upper boundary, no +1 available
+            // TODO make separate step to avoid branch here
+            DElem wraparound;
+            if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+              wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
+            } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                                                DDimY>) {
+              wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
+            } else {
+              static_assert("Not implemented for this dimension");
+            }
+            strided_grid(ixyz) =
+                odd_filter[0] *
+                    strided_grid(ixyz -
+                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                                     current_stride)) +
+                odd_filter[1] * strided_grid(ixyz) +
+                odd_filter[2] * strided_grid(wraparound);
+          }
+        });
+    odd_strided_domain =
+        odd_strided_domain_from_domain<DDimInWhichToHierarchize>(
+            odd_strided_domain);
+  }
 }
 
 template <typename ChunkType>
@@ -253,44 +333,20 @@ int main(int argc, char* argv[])
         ddc::print_content(std::cout, strided_grid) << std::endl;
     }
 
-    // hierarchize / wavelet-ify
-    for (int grid_index = 0; grid_index < all_levels.size(); ++ grid_index){
-        auto& level = all_levels[grid_index];
-        auto coefficient = all_combi_coefficients[grid_index];
-        SDDom const& strided_domain = component_grid_domains[grid_index];
-        auto strided_grid = level_data[grid_index].span_view();
+  // hierarchize / wavelet-ify
+  for (int grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    auto &level = all_levels[grid_index];
+    auto coefficient = all_combi_coefficients[grid_index];
+    SDDom const &strided_domain = component_grid_domains[grid_index];
+    auto strided_grid = level_data[grid_index].span_view();
 
-        // the finest stride
-        assert((1 << (maximum_level[0] - level[0])) == strided_domain.strides().get<DDimX>());
-
-        std::array<double, 3> const odd_filter = {-0.5, 1.0, -0.5};
-
-        // start with the first dimension and the finest level
-        auto odd_strided_domain = odd_strided_domain_from_domain<DDimX>(strided_domain);
-        for (int current_level = level[0]; current_level > minimum_level[0]; --current_level){
-            int const current_stride = (1 << (maximum_level[0] - current_level));
-            int const next_coarser_stride = current_stride << 1;
-            ddc::parallel_for_each(
-                odd_strided_domain,
-                KOKKOS_LAMBDA(DElem const ixyz) {
-                    // how to access / slice at every other point in x?
-                    // check for out of bounds
-                    if (DElemX(ixyz) + DVectX(current_stride) <= DElemX(odd_strided_domain.back())){ 
-                        strided_grid(ixyz) = 
-                            odd_filter[0] * strided_grid(ixyz - DVectX(current_stride)) +
-                            odd_filter[1] * strided_grid(ixyz) +
-                            odd_filter[2] * strided_grid(ixyz + DVectX(current_stride));
-                    } else {
-                        // on the upper boundary, no +1 available 
-                        // TODO make separate step to avoid branch here
-                        auto wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
-                        strided_grid(ixyz) = 
-                            odd_filter[0] * strided_grid(ixyz - DVectX(current_stride)) +
-                            odd_filter[1] * strided_grid(ixyz) +
-                            odd_filter[2] * strided_grid(wraparound);
-                    }
-                });
-            odd_strided_domain = odd_strided_domain_from_domain<DDimX>(odd_strided_domain);
-        }
-    }
+    hierarchize_in_direction<DDimX>(strided_domain, strided_grid, level,
+                                    minimum_level, maximum_level);
+    hierarchize_in_direction<DDimY>(strided_domain, strided_grid, level,
+                                    minimum_level, maximum_level);
+#if DIMENSIONALITY > 2
+    hierarchize_in_direction<DDimZ>(strided_domain, strided_grid, level,
+                                    minimum_level, maximum_level);
+#endif
+  }
 }
