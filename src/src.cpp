@@ -126,7 +126,7 @@ double const z_end = 1.;
 
 SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, std::array<int, dimensionality> const& finest_level) {
     std::array<long int, dimensionality> resolution;
-    std::ranges::transform(finest_level, resolution.begin(), [](int ml) { return (1 << ml) + 1; });
+    std::ranges::transform(level, resolution.begin(), [](int ml) { return (1 << ml); });
     DVect resolution_all;
     ddc::detail::array(resolution_all) = resolution; //TODO temporary solution until assignment from std::array is implemented
 
