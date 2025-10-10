@@ -1,0 +1,39 @@
+#!/usr/bin/env/python3
+
+import numpy as np
+import matplotlib.pyplot as plt
+from icecream import ic
+
+
+def filename_from_level(level):
+    level_str = "_".join([str(l) for l in level]) + "_" + str(len(level)) + "d"
+    return "strided_grid_" + level_str + ".raw"
+
+
+if __name__ == "__main__":
+    # combination_scheme = [[4,6,7], [5,5,7], [5,6,6], [4,5,6]]
+    combination_scheme = [[2, 5], [3, 4], [4, 3], [2, 4], [3, 3]]
+    minimum_level = np.min(combination_scheme, axis=0)
+    maximum_level = np.max(combination_scheme, axis=0)
+    ic(minimum_level, maximum_level)
+    extent = [0.0, 1.0, 0.0, 1.0]
+    nrows = maximum_level[0] - minimum_level[0] + 1
+    ncols = maximum_level[1] - minimum_level[1] + 1
+    ic(nrows, ncols)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 10))
+    for level in combination_scheme:
+        filename = filename_from_level(level)
+        ic(filename)
+        data = np.fromfile(filename, dtype=np.float64)
+        shape = tuple([2**l for l in level])
+        data = data.reshape(shape)
+        ic(data.shape)
+        # plot slices
+        ax = plt.subplot2grid(
+            (nrows, ncols),
+            (level[0] - minimum_level[0], level[1] - minimum_level[1]),
+            fig=fig,
+        )
+        ax.imshow(data, aspect="auto", origin="lower")
+        ax.set_title(f"Level: {level}")
+    plt.show()
