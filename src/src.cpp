@@ -246,6 +246,23 @@ void hierarchize_in_direction(
   }
 }
 
+template <typename T> // with T for example std::array<long int, dimensionality>
+void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
+                                    size_t current_dim,
+                                    std::function<void(const T &)> callback) {
+  assert(tmp_level.size() == nodal_level.size());
+  if (current_dim < nodal_level.size()) {
+    for (tmp_level[current_dim] = 0;
+         tmp_level[current_dim] <= nodal_level[current_dim];
+         ++tmp_level[current_dim]) {
+      iterate_hierarchical_subspaces(nodal_level, tmp_level, current_dim + 1,
+                                     callback);
+    }
+  } else {
+    callback(tmp_level);
+  }
+}
+
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span, std::string const& filename){
     std::ofstream file(filename, std::ios::trunc | std::ios::binary);
@@ -343,10 +360,9 @@ int main(int argc, char* argv[])
         ddc::print_content(std::cout, strided_grid) << std::endl;
     }
 
-  // hierarchize / wavelet-ify
+  // hierarchize / wavelet-ify / filter in each direction
   for (int grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
-    auto coefficient = all_combi_coefficients[grid_index];
     SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
@@ -358,5 +374,22 @@ int main(int argc, char* argv[])
     hierarchize_in_direction<DDimZ>(strided_domain, strided_grid, level,
                                     minimum_level, maximum_level);
 #endif
+  }
+
+  // sparse grid!
+  std::map<std::array<long int, dimensionality>, int> subspace_count;
+  // for each component grid, count up the contained subspaces
+  std::function<void(const std::array<long int, dimensionality> &)>
+      insert_function =
+          [&](const std::array<long int, dimensionality> &subspace_level) {
+            if (subspace_count.find(subspace_level) == subspace_count.end()) {
+              subspace_count[subspace_level] = 1;
+            } else {
+              ++subspace_count[subspace_level];
+            }
+          };
+  for (const auto &level : all_levels) {
+    std::array<long int, dimensionality> tmp_level;
+    iterate_hierarchical_subspaces(level, tmp_level, 0, insert_function);
   }
 }
