@@ -219,25 +219,28 @@ static const std::map<std::string,
         {"hat", {{1, {0.5, 1.0, 0.5}}}},
 };
 
-template <typename DDimInWhichToHierarchize>
-void hierarchize_in_direction(
-    SDDom const &strided_domain,
-    ddc::ChunkSpan<double, SDDom> const strided_grid,
-    std::array<long int, dimensionality> const &level,
-    std::array<long int, dimensionality> const &minimum_level,
-    std::array<long int, dimensionality> const &maximum_level) {
-  DVect ddc_level, ddc_max_level, ddc_min_level;
+template <typename InWhichDim>
+ddc::DiscreteVector<InWhichDim>
+get_dimension_component(std::array<long int, dimensionality> const &level) {
+  DVect ddc_level;
   ddc::detail::array(ddc_level) = level; // TODO temporary solution until
                                          // assignment from std::array is
                                          // implemented
-  ddc::detail::array(ddc_max_level) = maximum_level;
-  ddc::detail::array(ddc_min_level) = minimum_level;
-  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_level_1d_vec(
-      ddc_level);
-  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_max_level_1d_vec(
-      ddc_max_level);
-  ddc::DiscreteVector<DDimInWhichToHierarchize> const ddc_min_level_1d_vec(
-      ddc_min_level);
+  return ddc::DiscreteVector<InWhichDim>(ddc_level);
+}
+
+template <typename DDimInWhichToHierarchize>
+void hierarchize_in(SDDom const &strided_domain,
+                    ddc::ChunkSpan<double, SDDom> const strided_grid,
+                    std::array<long int, dimensionality> const &level,
+                    std::array<long int, dimensionality> const &minimum_level,
+                    std::array<long int, dimensionality> const &maximum_level) {
+  auto const ddc_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(level);
+  auto const ddc_max_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(maximum_level);
+  auto const ddc_min_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
 
   // the finest stride
   assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
@@ -249,15 +252,13 @@ void hierarchize_in_direction(
     if constexpr (offset == 0) {
       coarsen_domain =
           even_strided_domain_from_domain<DDimInWhichToHierarchize>;
+      throw std::runtime_error("Offset 0 not yet implemented");
     } else if constexpr (offset == 1) {
       coarsen_domain = odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
     } else {
       throw std::runtime_error("Filter offset not supported");
     }
     auto operating_domain = coarsen_domain(strided_domain);
-    if (offset == 0) {
-      throw std::runtime_error("Offset 0 not yet implemented");
-    }
     for (long int current_level = ddc_level_1d_vec;
          current_level > ddc_min_level_1d_vec; --current_level) {
       int const current_stride = (1 << (ddc_max_level_1d_vec - current_level));
@@ -423,17 +424,18 @@ int main(int argc, char* argv[])
 
   // hierarchize / wavelet-ify / filter in each direction
   for (int grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    // todo this for is another potential parallel_for_each!
     auto &level = all_levels[grid_index];
     SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    hierarchize_in_direction<DDimX>(strided_domain, strided_grid, level,
-                                    minimum_level, maximum_level);
-    hierarchize_in_direction<DDimY>(strided_domain, strided_grid, level,
-                                    minimum_level, maximum_level);
+    hierarchize_in<DDimX>(strided_domain, strided_grid, level, minimum_level,
+                          maximum_level);
+    hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
+                          maximum_level);
 #if DIMENSIONALITY > 2
-    hierarchize_in_direction<DDimZ>(strided_domain, strided_grid, level,
-                                    minimum_level, maximum_level);
+    hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
+                          maximum_level);
 #endif
   }
 
