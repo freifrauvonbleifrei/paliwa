@@ -469,7 +469,7 @@ int main(int argc, char* argv[])
     }
   }
   std::cout << "Total size of all subspaces: " << accumulated_size << std::endl;
-  
+
   // allocate once
   std::vector<double> all_subspace_data(accumulated_size);
   size_t current_data_pointer_index = 0;
@@ -479,5 +479,53 @@ int main(int argc, char* argv[])
     // basically exclusive scan
     data_pointer = all_subspace_data.data() + current_data_pointer_index;
     current_data_pointer_index += subspace_domain.size();
+  }
+
+  // collect component grids onto the sparse grid
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    // todo this for is another potential parallel_for_each!
+    auto &level = all_levels[grid_index];
+    double coefficient = all_combi_coefficients[grid_index];
+    SDDom const &strided_domain = component_grid_domains[grid_index];
+    auto strided_grid = level_data[grid_index].span_view();
+
+    for (const auto &subspace_level_and_data :
+         subspaces_domains_and_data_pointers) {
+      auto const &subspace_level = subspace_level_and_data.first;
+      auto const &subspace_domain = subspace_level_and_data.second.first;
+      auto const &data_pointer = subspace_level_and_data.second.second;
+      bool contains = true; // TODO use ddc contains domain operator
+      for (size_t d = 0; d < dimensionality; ++d) {
+        if (subspace_level[d] > level[d]) {
+          contains = false;
+          break;
+        }
+      }
+      if (contains) {
+        // copy data into the allocated space
+        ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
+                                                          subspace_domain);
+        auto subspace_view = subspace_chunk_span.span_view();
+        ddc::parallel_for_each(
+            subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+              subspace_view(ixyz) += coefficient * strided_grid(ixyz);
+            });
+      }
+    }
+  }
+
+  // now copy into full grid
+  for (const auto &subspace_level_and_data :
+       subspaces_domains_and_data_pointers) {
+    auto const &subspace_level = subspace_level_and_data.first;
+    auto const &subspace_domain = subspace_level_and_data.second.first;
+    auto const &data_pointer = subspace_level_and_data.second.second;
+    ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
+                                                      subspace_domain);
+    auto subspace_view = subspace_chunk_span.span_view();
+    ddc::parallel_for_each(
+        subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+          full_grid_view(ixyz) += subspace_view(ixyz);
+        });
   }
 }
