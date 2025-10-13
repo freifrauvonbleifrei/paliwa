@@ -207,6 +207,18 @@ SDDom even_strided_domain_from_domain(SDDom const &domain) {
   return SDDom(lbound_all, extent_even, strides_even);
 }
 
+// TODO consider making this constexpr frozen::map ?
+static const std::map<std::string,
+                      std::vector<std::pair<int, std::array<double, 3>>>>
+    lifting_wavelet_filter_offsets_and_coefficients = {
+        {"hat", {{1, {-0.5, 1.0, -0.5}}}},
+};
+static const std::map<std::string,
+                      std::vector<std::pair<int, std::array<double, 3>>>>
+    lifting_wavelet_reconstruct_offsets_and_coefficients = {
+        {"hat", {{1, {0.5, 1.0, 0.5}}}},
+};
+
 template <typename DDimInWhichToHierarchize>
 void hierarchize_in_direction(
     SDDom const &strided_domain,
@@ -231,56 +243,67 @@ void hierarchize_in_direction(
   assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
          strided_domain.strides().get<DDimInWhichToHierarchize>());
 
-  std::array<double, 3> const odd_filter = {-0.5, 1.0, -0.5};
-  auto odd_strided_domain =
-      odd_strided_domain_from_domain<DDimInWhichToHierarchize>(strided_domain);
-  for (long int current_level = ddc_level_1d_vec;
-       current_level > ddc_min_level_1d_vec; --current_level) {
-    int const current_stride = (1 << (ddc_max_level_1d_vec - current_level));
-    int const next_coarser_stride = current_stride << 1;
-    ddc::parallel_for_each(
-        odd_strided_domain, KOKKOS_LAMBDA(DElem const ixyz) {
-          // how to access / slice at every other point in x?
-          // check for out of bounds
-          if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
-                  ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                      current_stride) <=
-              ddc::DiscreteElement<DDimInWhichToHierarchize>(
-                  odd_strided_domain.back())) {
-            strided_grid(ixyz) =
-                odd_filter[0] *
-                    strided_grid(ixyz -
-                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+  for (auto const &[offset, filter] :
+       lifting_wavelet_filter_offsets_and_coefficients.at("hat")) {
+    std::function<SDDom(SDDom const &)> coarsen_domain;
+    if constexpr (offset == 0) {
+      coarsen_domain =
+          even_strided_domain_from_domain<DDimInWhichToHierarchize>;
+    } else if constexpr (offset == 1) {
+      coarsen_domain = odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
+    } else {
+      throw std::runtime_error("Filter offset not supported");
+    }
+    auto operating_domain = coarsen_domain(strided_domain);
+    if (offset == 0) {
+      throw std::runtime_error("Offset 0 not yet implemented");
+    }
+    for (long int current_level = ddc_level_1d_vec;
+         current_level > ddc_min_level_1d_vec; --current_level) {
+      int const current_stride = (1 << (ddc_max_level_1d_vec - current_level));
+      int const next_coarser_stride = current_stride << 1;
+      ddc::parallel_for_each(
+          operating_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+            // how to access / slice at every other point in x?
+            // check for out of bounds
+            if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
+                    ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                        current_stride) <=
+                ddc::DiscreteElement<DDimInWhichToHierarchize>(
+                    operating_domain.back())) {
+              strided_grid(ixyz) =
+                  filter[0] *
+                      strided_grid(
+                          ixyz - ddc::DiscreteVector<DDimInWhichToHierarchize>(
                                      current_stride)) +
-                odd_filter[1] * strided_grid(ixyz) +
-                odd_filter[2] *
-                    strided_grid(ixyz +
-                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                  filter[1] * strided_grid(ixyz) +
+                  filter[2] *
+                      strided_grid(
+                          ixyz + ddc::DiscreteVector<DDimInWhichToHierarchize>(
                                      current_stride));
-          } else {
-            // on the upper boundary, no +1 available
-            // TODO make separate step to avoid branch here
-            DElem wraparound;
-            if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
-              wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
-            } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
-                                                DDimY>) {
-              wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
             } else {
-              static_assert("Not implemented for this dimension");
-            }
-            strided_grid(ixyz) =
-                odd_filter[0] *
-                    strided_grid(ixyz -
-                                 ddc::DiscreteVector<DDimInWhichToHierarchize>(
+              // on the upper boundary, no +1 available
+              // TODO make separate step to avoid branch here
+              DElem wraparound;
+              if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+                wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
+              } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                                                  DDimY>) {
+                wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
+              } else {
+                static_assert("Not implemented for this dimension");
+              }
+              strided_grid(ixyz) =
+                  filter[0] *
+                      strided_grid(
+                          ixyz - ddc::DiscreteVector<DDimInWhichToHierarchize>(
                                      current_stride)) +
-                odd_filter[1] * strided_grid(ixyz) +
-                odd_filter[2] * strided_grid(wraparound);
-          }
-        });
-    odd_strided_domain =
-        odd_strided_domain_from_domain<DDimInWhichToHierarchize>(
-            odd_strided_domain);
+                  filter[1] * strided_grid(ixyz) +
+                  filter[2] * strided_grid(wraparound);
+            }
+          });
+      operating_domain = coarsen_domain(operating_domain);
+    }
   }
 }
 
