@@ -19,24 +19,25 @@ static constexpr int8_t dimensionality = DIMENSIONALITY;
 
 struct X {
 #if defined(PERIODIC_DOMAIN)
-    static constexpr bool PERIODIC = true;
+  static constexpr bool PERIODIC = true;
 #else
-    static constexpr bool PERIODIC = false;
+  static constexpr bool PERIODIC = false;
+  static_assert(!PERIODIC, "Non-periodic case not implemented/untested");
 #endif
 };
 struct Y {
 #if defined(PERIODIC_DOMAIN)
-    static constexpr bool PERIODIC = true;
+  static constexpr bool PERIODIC = true;
 #else
-    static constexpr bool PERIODIC = false;
+  static constexpr bool PERIODIC = false;
 #endif
 };
 #if DIMENSIONALITY > 2
 struct Z {
 #if defined(PERIODIC_DOMAIN)
-    static constexpr bool PERIODIC = true;
+  static constexpr bool PERIODIC = true;
 #else
-    static constexpr bool PERIODIC = false;
+  static constexpr bool PERIODIC = false;
 #endif
 };
 #endif
@@ -124,19 +125,26 @@ double const y_end = 1.;
 double const z_start = 0.;
 double const z_end = 1.;
 
-SDDom strided_domain_from_level(std::array<int, dimensionality> const& level, std::array<int, dimensionality> const& finest_level) {
-    std::array<long int, dimensionality> resolution;
-    std::ranges::transform(level, resolution.begin(), [](int ml) { return (1 << ml); });
-    DVect resolution_all;
-    ddc::detail::array(resolution_all) = resolution; //TODO temporary solution until assignment from std::array is implemented
+SDDom strided_domain_from_level(
+    std::array<long int, dimensionality> const &level,
+    std::array<long int, dimensionality> const &finest_level) {
+  std::array<long int, dimensionality> resolution;
+  std::ranges::transform(level, resolution.begin(),
+                         [](long int ml) { return (1 << ml); });
+  DVect resolution_all;
+  ddc::detail::array(resolution_all) =
+      resolution; // TODO temporary solution until assignment from std::array is
+                  // implemented
 
-    std::array<int, dimensionality> level_diff;
-    std::ranges::transform(level, finest_level, level_diff.begin(), [](int l, int ml) { return ml - l; });
-    std::array<long int, dimensionality> stride;
-    std::ranges::transform(level_diff, stride.begin(), [](int l) { return (1 << l); });
-    DVect strides_all;
-    ddc::detail::array(strides_all) = stride; //TODO 
-    return SDDom(lbound_all, resolution_all, strides_all);
+  std::array<long int, dimensionality> level_diff;
+  std::ranges::transform(level, finest_level, level_diff.begin(),
+                         [](long int l, long int ml) { return ml - l; });
+  std::array<long int, dimensionality> stride;
+  std::ranges::transform(level_diff, stride.begin(),
+                         [](long int l) { return (1 << l); });
+  DVect strides_all;
+  ddc::detail::array(strides_all) = stride; // TODO
+  return SDDom(lbound_all, resolution_all, strides_all);
 }
 
 template <typename DDimInWhichItsOdd>
@@ -253,9 +261,9 @@ int main(int argc, char* argv[])
     ddc::ScopeGuard const ddc_scope;
 
 #if DIMENSIONALITY > 2
-    std::array<int, dimensionality> const maximum_level = {5, 6, 7};
+  std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
 #else
-    std::array<int, dimensionality> const maximum_level = {4, 5};
+  std::array<long int, dimensionality> const maximum_level = {4, 5};
 #endif
     std::array<long int, dimensionality> resolution;
     std::transform(
@@ -288,15 +296,17 @@ int main(int argc, char* argv[])
     DDom const dom_all(x_domain, y_domain);
 #endif
 
-# if DIMENSIONALITY > 2
-    std::array<int, dimensionality> const minimum_level = {4, 5, 6};
-    std::vector<std::array<int, dimensionality>> all_levels = {{4,6,7}, {5,5,7}, {5,6,6}, {4,5,6}};
-    std::vector<int> all_combi_coefficients = {1, 1, 1, -2};
-# else
-    std::array<int, dimensionality> const minimum_level = {2, 3};
-    std::vector<std::array<int, dimensionality>> all_levels = {{2,5}, {3,4}, {4,3}, {2,4}, {3,3}};
-    std::vector<int> all_combi_coefficients = {1, 1, 1, -1, -1};
-# endif
+#if DIMENSIONALITY > 2
+  std::array<long int, dimensionality> const minimum_level = {4, 5, 6};
+  std::vector<std::array<long int, dimensionality>> all_levels = {
+      {4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
+  std::vector<double> all_combi_coefficients = {1, 1, 1, -2};
+#else
+  std::array<long int, dimensionality> const minimum_level = {2, 3};
+  std::vector<std::array<long int, dimensionality>> all_levels = {
+      {2, 5}, {3, 4}, {4, 3}, {2, 4}, {3, 3}};
+  std::vector<double> all_combi_coefficients = {1, 1, 1, -1, -1};
+#endif
     std::vector<SDDom> component_grid_domains;
     //TODO these as Kokkos unordered_map?
     std::vector<ddc::Chunk<double, SDDom>> level_data;
