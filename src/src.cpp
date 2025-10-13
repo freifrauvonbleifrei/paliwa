@@ -104,7 +104,7 @@ using SDDom = SDDomXYZ;
 
 // DElemZ constexpr lbound_z = ddc::init_trivial_half_bounded_space<DDimZ>();
 // DElem constexpr lbound_all(lbound_x, lbound_y, lbound_z);
-DElem constexpr lbound_all(0,0,0);
+DElem constexpr lbound_all(0, 0, 0);
 
 #else // DIMENSIONALITY > 2
 
@@ -114,7 +114,7 @@ using DDom = DDomXY;
 using SDDom = SDDomXY;
 
 // DElem constexpr lbound_all(lbound_x, lbound_y);
-DElem constexpr lbound_all(0,0);
+DElem constexpr lbound_all(0, 0);
 
 #endif // DIMENSIONALITY > 2
 
@@ -135,7 +135,7 @@ SDDom strided_domain_from_level(
   ddc::detail::array(resolution_all) =
       resolution; // TODO temporary solution until assignment from std::array is
                   // implemented
-
+  // TODO special case level 0
   std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
@@ -145,6 +145,44 @@ SDDom strided_domain_from_level(
   DVect strides_all;
   ddc::detail::array(strides_all) = stride; // TODO
   return SDDom(lbound_all, resolution_all, strides_all);
+}
+
+SDDom strided_hierarchical_domain_from_level(
+    std::array<long int, dimensionality> const &level,
+    std::array<long int, dimensionality> const &finest_level) {
+  std::array<long int, dimensionality> resolution;
+  std::ranges::transform(level, resolution.begin(),
+                         [](long int ml) { return (1 << (ml - 1)); });
+  std::array<long int, dimensionality> level_diff;
+  std::ranges::transform(level, finest_level, level_diff.begin(),
+                         [](long int l, long int ml) { return ml - l; });
+  std::array<long int, dimensionality> half_stride;
+  std::ranges::transform(level_diff, half_stride.begin(),
+                         [](long int l) { return (1 << l); });
+  // special case level 0
+  for (size_t i = 0; i < dimensionality; ++i) {
+    assert(level[i] <= finest_level[i]);
+    assert(level[i] >= 0);
+    if (level[i] == 0) {
+      resolution[i] = 1;  // the coarsest level has one point
+      half_stride[i] = 0; // no offset
+    }
+  }
+  DVect resolution_all;
+  ddc::detail::array(resolution_all) =
+      resolution; // TODO temporary solution until assignment from std::array is
+                  // implemented
+  DVect half_stride_vect;
+  ddc::detail::array(half_stride_vect) = half_stride; // TODO
+  DElem start_all = lbound_all + half_stride_vect;
+  std::array<long int, dimensionality> stride;
+  std::ranges::transform(level_diff, stride.begin(),
+                         [](long int l) { return (1 << (l + 1)); });
+  DVect strides_all;
+  ddc::detail::array(strides_all) = stride; // TODO
+  std::cout << " subs " << start_all << " " << resolution_all << " "
+            << strides_all << std::endl;
+  return SDDom(start_all, resolution_all, strides_all);
 }
 
 template <typename DDimInWhichItsOdd>
@@ -391,5 +429,32 @@ int main(int argc, char* argv[])
   for (const auto &level : all_levels) {
     std::array<long int, dimensionality> tmp_level;
     iterate_hierarchical_subspaces(level, tmp_level, 0, insert_function);
+  }
+
+  std::map<std::array<long int, dimensionality>, std::pair<SDDom, double *>>
+      subspaces_domains_and_data_pointers;
+  size_t accumulated_size = 0;
+  for (const auto &subspace_level_and_count : subspace_count) {
+    auto const &subspace_level = subspace_level_and_count.first;
+    auto const &count = subspace_level_and_count.second;
+    if (count > 1) {
+      auto subspace_domain =
+          strided_hierarchical_domain_from_level(subspace_level, maximum_level);
+      accumulated_size += subspace_domain.size();
+      subspaces_domains_and_data_pointers[subspace_level] =
+          std::make_pair(std::move(subspace_domain), nullptr);
+    }
+  }
+  std::cout << "Total size of all subspaces: " << accumulated_size << std::endl;
+  
+  // allocate once
+  std::vector<double> all_subspace_data(accumulated_size);
+  size_t current_data_pointer_index = 0;
+  for (auto &subspace_level_and_data : subspaces_domains_and_data_pointers) {
+    auto &subspace_domain = subspace_level_and_data.second.first;
+    auto &data_pointer = subspace_level_and_data.second.second;
+    // basically exclusive scan
+    data_pointer = all_subspace_data.data() + current_data_pointer_index;
+    current_data_pointer_index += subspace_domain.size();
   }
 }
