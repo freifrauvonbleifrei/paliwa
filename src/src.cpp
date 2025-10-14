@@ -231,7 +231,9 @@ void transform_in(SDDom const &strided_domain,
                   ddc::ChunkSpan<double, SDDom> const strided_grid,
                   std::array<long int, dimensionality> const &level,
                   std::array<long int, dimensionality> const &maximum_level,
-                  LevelRange const &one_d_level_range) {
+                  LevelRange const &one_d_level_range,
+                  std::vector<std::pair<int, std::array<double, 3>>> const
+                      &lifting_offsets_and_coefficients) {
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
   auto const ddc_max_level_1d_vec =
@@ -252,8 +254,7 @@ void transform_in(SDDom const &strided_domain,
     auto const operating_domain = strided_domain_from_level(
         ddc::detail::array(current_level), maximum_level);
 
-    for (auto const &[offset, filter] :
-         lifting_wavelet_filter_offsets_and_coefficients.at("hat")) {
+    for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
       std::function<SDDom(SDDom const &)> coarsen_domain;
       if (offset == 0) {
         coarsen_domain =
@@ -327,7 +328,8 @@ void hierarchize_in(SDDom const &strided_domain,
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
-      strided_domain, strided_grid, level, maximum_level, decreasing_range);
+      strided_domain, strided_grid, level, maximum_level, decreasing_range,
+      lifting_wavelet_filter_offsets_and_coefficients.at("hat"));
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
