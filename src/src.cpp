@@ -244,11 +244,11 @@ void hierarchize_in(SDDom const &strided_domain,
   for (auto const &[offset, filter] :
        lifting_wavelet_filter_offsets_and_coefficients.at("hat")) {
     std::function<SDDom(SDDom const &)> coarsen_domain;
-    if constexpr (offset == 0) {
+    if (offset == 0) {
       coarsen_domain =
           even_strided_domain_from_domain<DDimInWhichToHierarchize>;
       throw std::runtime_error("Offset 0 not yet implemented");
-    } else if constexpr (offset == 1) {
+    } else if (offset == 1) {
       coarsen_domain = odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
     } else {
       throw std::runtime_error("Filter offset not supported");
