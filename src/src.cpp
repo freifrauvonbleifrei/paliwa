@@ -226,9 +226,10 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
 }
 
 template <typename DDimInWhichToHierarchize,
-          typename LevelRange> // TODO input_range concept
-void transform_in(SDDom const &strided_domain,
-                  ddc::ChunkSpan<double, SDDom> const strided_grid,
+          typename DDomainType, // TODO either DDom or SDDom
+          typename LevelRange>  // TODO input_range concept
+void transform_in(DDomainType const &strided_domain,
+                  ddc::ChunkSpan<double, DDomainType> const strided_grid,
                   std::array<long int, dimensionality> const &level,
                   std::array<long int, dimensionality> const &maximum_level,
                   LevelRange const &one_d_level_range,
@@ -239,9 +240,11 @@ void transform_in(SDDom const &strided_domain,
   auto const ddc_max_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(maximum_level);
 
-  // the finest stride
-  assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
-         strided_domain.strides().get<DDimInWhichToHierarchize>());
+  // check the finest stride, if DDomainType is SDDom
+  if constexpr (std::is_same_v<DDomainType, SDDom>) {
+    assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
+           strided_domain.strides().template get<DDimInWhichToHierarchize>());
+  }
 
   DVect current_level;
   ddc::detail::array(current_level) = level; // TODO temporary solution until
@@ -311,9 +314,9 @@ void transform_in(SDDom const &strided_domain,
   }
 }
 
-template <typename DDimInWhichToHierarchize>
-void hierarchize_in(SDDom const &strided_domain,
-                    ddc::ChunkSpan<double, SDDom> const strided_grid,
+template <typename DDimInWhichToHierarchize, typename DDomainType>
+void hierarchize_in(DDomainType const &strided_domain,
+                    ddc::ChunkSpan<double, DDomainType> const strided_grid,
                     std::array<long int, dimensionality> const &level,
                     std::array<long int, dimensionality> const &minimum_level,
                     std::array<long int, dimensionality> const &maximum_level) {
@@ -324,12 +327,33 @@ void hierarchize_in(SDDom const &strided_domain,
       get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
 
   auto decreasing_range =
-      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) + 1,
+      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, decreasing_range,
       lifting_wavelet_filter_offsets_and_coefficients.at("hat"));
+}
+
+template <typename DDimInWhichToHierarchize, typename DDomainType>
+void dehierarchize_in(
+    DDomainType const &strided_domain,
+    ddc::ChunkSpan<double, DDomainType> const strided_grid,
+    std::array<long int, dimensionality> const &level,
+    std::array<long int, dimensionality> const &minimum_level,
+    std::array<long int, dimensionality> const &maximum_level) {
+
+  auto const ddc_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(level);
+  auto const ddc_min_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
+
+  auto increasing_range =
+      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
+                       static_cast<long int>(ddc_level_1d_vec) + 1);
+  return transform_in<DDimInWhichToHierarchize>(
+      strided_domain, strided_grid, level, maximum_level, increasing_range,
+      lifting_wavelet_reconstruct_offsets_and_coefficients.at("hat"));
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
@@ -564,4 +588,18 @@ int main(int argc, char *argv[]) {
           full_grid_view(ixyz) += subspace_view(ixyz);
         });
   }
+
+  //   de-hierarchize on the combined full grid
+  dehierarchize_in<DDimX>(dom_all, full_grid_view, maximum_level, minimum_level,
+                          maximum_level);
+  dehierarchize_in<DDimY>(dom_all, full_grid_view, maximum_level, minimum_level,
+                          maximum_level);
+
+  std::string max_level_str = "";
+  for (auto l : maximum_level) {
+    max_level_str += std::to_string(l) + "_";
+  }
+  max_level_str += std::to_string(dimensionality) + "d";
+  std::string const filename = "full_grid_" + max_level_str + ".raw";
+  dump_chunk_span_to_binary_file(full_grid_view, filename);
 }
