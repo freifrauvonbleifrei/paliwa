@@ -36,4 +36,19 @@ if __name__ == "__main__":
         )
         ax.imshow(data, aspect="auto", origin="lower")
         ax.set_title(f"Level: {level}")
+    # print maximum level
+    full_grid_filename =  filename_from_level(maximum_level)
+    full_grid_filename = full_grid_filename.replace("strided_grid", "full_grid")
+    ic(full_grid_filename)
+    full_grid_data = np.fromfile(full_grid_filename, dtype=np.float64)
+    full_grid_shape = tuple([2**l for l in maximum_level])
+    full_grid_data = full_grid_data.reshape(full_grid_shape)
+    ic(full_grid_data.shape)
+    ax = plt.subplot2grid(
+        (nrows, ncols),
+        (nrows -1, ncols -1),
+        fig=fig,
+    )
+    ax.imshow(full_grid_data, aspect="auto", origin="lower")
+    ax.set_title(f"Combined: {maximum_level}")
     plt.show()
