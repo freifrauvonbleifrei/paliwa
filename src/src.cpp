@@ -225,18 +225,17 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
   return ddc::DiscreteVector<InWhichDim>(ddc_level);
 }
 
-template <typename DDimInWhichToHierarchize>
-void hierarchize_in(SDDom const &strided_domain,
-                    ddc::ChunkSpan<double, SDDom> const strided_grid,
-                    std::array<long int, dimensionality> const &level,
-                    std::array<long int, dimensionality> const &minimum_level,
-                    std::array<long int, dimensionality> const &maximum_level) {
+template <typename DDimInWhichToHierarchize,
+          typename LevelRange> // TODO input_range concept
+void transform_in(SDDom const &strided_domain,
+                  ddc::ChunkSpan<double, SDDom> const strided_grid,
+                  std::array<long int, dimensionality> const &level,
+                  std::array<long int, dimensionality> const &maximum_level,
+                  LevelRange const &one_d_level_range) {
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
   auto const ddc_max_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(maximum_level);
-  auto const ddc_min_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
 
   // the finest stride
   assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
@@ -247,10 +246,7 @@ void hierarchize_in(SDDom const &strided_domain,
                                              // assignment from std::array is
                                              // implemented
 
-  for (long int current_1d_level :
-       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) + 1,
-                        static_cast<long int>(ddc_level_1d_vec) + 1) |
-           std::views::reverse) {
+  for (long int current_1d_level : one_d_level_range) {
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
     current_level.get<DDimInWhichToHierarchize>() = current_1d_level;
     auto const operating_domain = strided_domain_from_level(
@@ -312,6 +308,26 @@ void hierarchize_in(SDDom const &strided_domain,
           });
     }
   }
+}
+
+template <typename DDimInWhichToHierarchize>
+void hierarchize_in(SDDom const &strided_domain,
+                    ddc::ChunkSpan<double, SDDom> const strided_grid,
+                    std::array<long int, dimensionality> const &level,
+                    std::array<long int, dimensionality> const &minimum_level,
+                    std::array<long int, dimensionality> const &maximum_level) {
+
+  auto const ddc_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(level);
+  auto const ddc_min_level_1d_vec =
+      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
+
+  auto decreasing_range =
+      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) + 1,
+                       static_cast<long int>(ddc_level_1d_vec) + 1) |
+      std::views::reverse;
+  return transform_in<DDimInWhichToHierarchize>(
+      strided_domain, strided_grid, level, maximum_level, decreasing_range);
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
