@@ -457,7 +457,7 @@ int main(int argc, char* argv[])
   }
 
   std::map<std::array<long int, dimensionality>, std::pair<SDDom, double *>>
-      subspaces_domains_and_data_pointers;
+      subspaces_domains_and_data_pointers; // TODO kokkos::unordered_map?
   size_t accumulated_size = 0;
   for (const auto &subspace_level_and_count : subspace_count) {
     auto const &subspace_level = subspace_level_and_count.first;
@@ -515,6 +515,12 @@ int main(int argc, char* argv[])
       }
     }
   }
+
+  // interpolate all onto full grid
+  // allocate and initialize to 0
+  ddc::Chunk full_grid("interpolated_on_full_grid", dom_all,
+                       ddc::DeviceAllocator<double>());
+  auto full_grid_view = full_grid.span_view();
 
   // now copy into full grid
   for (const auto &subspace_level_and_data :
