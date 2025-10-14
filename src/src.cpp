@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iostream>
 #include <numeric>
+#include <ranges>
 #include <vector>
 
 #include <ddc/ddc.hpp>
@@ -241,32 +242,43 @@ void hierarchize_in(SDDom const &strided_domain,
   assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
          strided_domain.strides().get<DDimInWhichToHierarchize>());
 
-  for (auto const &[offset, filter] :
-       lifting_wavelet_filter_offsets_and_coefficients.at("hat")) {
-    std::function<SDDom(SDDom const &)> coarsen_domain;
-    if (offset == 0) {
-      coarsen_domain =
-          even_strided_domain_from_domain<DDimInWhichToHierarchize>;
-      throw std::runtime_error("Offset 0 not yet implemented");
-    } else if (offset == 1) {
-      coarsen_domain = odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
-    } else {
-      throw std::runtime_error("Filter offset not supported");
-    }
-    auto operating_domain = coarsen_domain(strided_domain);
-    for (long int current_level = ddc_level_1d_vec;
-         current_level > ddc_min_level_1d_vec; --current_level) {
-      int const current_stride = (1 << (ddc_max_level_1d_vec - current_level));
-      int const next_coarser_stride = current_stride << 1;
+  DVect current_level;
+  ddc::detail::array(current_level) = level; // TODO temporary solution until
+                                             // assignment from std::array is
+                                             // implemented
+
+  for (long int current_1d_level :
+       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) + 1,
+                        static_cast<long int>(ddc_level_1d_vec) + 1) |
+           std::views::reverse) {
+    int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
+    current_level.get<DDimInWhichToHierarchize>() = current_1d_level;
+    auto const operating_domain = strided_domain_from_level(
+        ddc::detail::array(current_level), maximum_level);
+
+    for (auto const &[offset, filter] :
+         lifting_wavelet_filter_offsets_and_coefficients.at("hat")) {
+      std::function<SDDom(SDDom const &)> coarsen_domain;
+      if (offset == 0) {
+        coarsen_domain =
+            even_strided_domain_from_domain<DDimInWhichToHierarchize>;
+        throw std::runtime_error("Offset 0 not yet implemented");
+      } else if (offset == 1) {
+        coarsen_domain =
+            odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
+      } else {
+        throw std::runtime_error("Filter offset not supported");
+      }
+      auto const write_to_domain = coarsen_domain(operating_domain);
       ddc::parallel_for_each(
-          operating_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+          write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
             // check for out of bounds
             if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
                     ddc::DiscreteVector<DDimInWhichToHierarchize>(
                         current_stride) <=
                 ddc::DiscreteElement<DDimInWhichToHierarchize>(
-                    operating_domain.back())) {
+                    write_to_domain.back())) {
               strided_grid(ixyz) =
                   filter[0] *
                       strided_grid(
@@ -298,7 +310,6 @@ void hierarchize_in(SDDom const &strided_domain,
                   filter[2] * strided_grid(wraparound);
             }
           });
-      operating_domain = coarsen_domain(operating_domain);
     }
   }
 }
