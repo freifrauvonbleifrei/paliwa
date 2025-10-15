@@ -215,9 +215,10 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
 
 template <typename DDimInWhichToHierarchize,
           typename DDomainType, // TODO either DDom or SDDom
+          typename ChunkSpanType, // TODO w.r.t. DDomainType
           typename LevelRange>  // TODO input_range concept
 void transform_in(DDomainType const &strided_domain,
-                  ddc::ChunkSpan<double, DDomainType> const strided_grid,
+                  ChunkSpanType const strided_grid,
                   std::array<long int, dimensionality> const &level,
                   std::array<long int, dimensionality> const &maximum_level,
                   LevelRange const &one_d_level_range,
@@ -302,9 +303,9 @@ void transform_in(DDomainType const &strided_domain,
   }
 }
 
-template <typename DDimInWhichToHierarchize, typename DDomainType>
+template <typename DDimInWhichToHierarchize, typename DDomainType, typename ChunkSpanType >
 void hierarchize_in(DDomainType const &strided_domain,
-                    ddc::ChunkSpan<double, DDomainType> const strided_grid,
+                    ChunkSpanType const strided_grid,
                     std::array<long int, dimensionality> const &level,
                     std::array<long int, dimensionality> const &minimum_level,
                     std::array<long int, dimensionality> const &maximum_level) {
@@ -323,10 +324,10 @@ void hierarchize_in(DDomainType const &strided_domain,
       lifting_wavelet_filter_offsets_and_coefficients.at("hat"));
 }
 
-template <typename DDimInWhichToHierarchize, typename DDomainType>
+template <typename DDimInWhichToHierarchize, typename DDomainType, typename ChunkSpanType>
 void dehierarchize_in(
     DDomainType const &strided_domain,
-    ddc::ChunkSpan<double, DDomainType> const strided_grid,
+    ChunkSpanType const strided_grid,
     std::array<long int, dimensionality> const &level,
     std::array<long int, dimensionality> const &minimum_level,
     std::array<long int, dimensionality> const &maximum_level) {
@@ -565,7 +566,6 @@ int main(int argc, char *argv[]) {
   // now copy into full grid
   for (const auto &subspace_level_and_data :
        subspaces_domains_and_data_pointers) {
-    auto const &subspace_level = subspace_level_and_data.first;
     auto const &subspace_domain = subspace_level_and_data.second.first;
     auto const &data_pointer = subspace_level_and_data.second.second;
     ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
@@ -578,9 +578,9 @@ int main(int argc, char *argv[]) {
   }
 
   //   de-hierarchize on the combined full grid
-  dehierarchize_in<DDimX>(dom_all, full_grid_view, maximum_level, minimum_level,
+  dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level, minimum_level,
                           maximum_level);
-  dehierarchize_in<DDimY>(dom_all, full_grid_view, maximum_level, minimum_level,
+  dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level, minimum_level,
                           maximum_level);
 
   std::string max_level_str = "";
