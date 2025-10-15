@@ -429,7 +429,7 @@ int main() {
 #endif
   std::vector<SDDom> component_grid_domains;
   // TODO these as Kokkos unordered_map?
-  std::vector<ddc::Chunk<double, SDDom>> level_data;
+  std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>> level_data;
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
