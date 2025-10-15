@@ -498,9 +498,14 @@ int main(int argc, char *argv[]) {
     iterate_hierarchical_subspaces(level, tmp_level, 0, insert_function);
   }
 
-  std::map<std::array<long int, dimensionality>, std::pair<SDDom, double *>>
+  Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
+                       Kokkos::DefaultHostExecutionSpace>
+      subspaces_levels;
+  Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
+                       Kokkos::DefaultHostExecutionSpace>
       subspaces_domains_and_data_pointers; // TODO kokkos::unordered_map?
   size_t accumulated_size = 0;
+  size_t used_subspace_number = 0;
   for (const auto &subspace_level_and_count : subspace_count) {
     auto const &subspace_level = subspace_level_and_count.first;
     auto const &count = subspace_level_and_count.second;
@@ -508,21 +513,29 @@ int main(int argc, char *argv[]) {
       auto subspace_domain =
           strided_hierarchical_domain_from_level(subspace_level, maximum_level);
       accumulated_size += subspace_domain.size();
-      subspaces_domains_and_data_pointers[subspace_level] =
-          std::make_pair(std::move(subspace_domain), nullptr);
+      subspaces_levels.insert(used_subspace_number, subspace_level);
+      subspaces_domains_and_data_pointers.insert(
+          used_subspace_number++,
+          std::make_pair(std::move(subspace_domain), nullptr));
     }
   }
   std::cout << "Total size of all subspaces: " << accumulated_size << std::endl;
 
   // allocate once
-  std::vector<double> all_subspace_data(accumulated_size);
+  Kokkos::View<double *> all_subspace_data("all_subspace_data",
+                                           accumulated_size);
+
   size_t current_data_pointer_index = 0;
-  for (auto &subspace_level_and_data : subspaces_domains_and_data_pointers) {
-    auto &subspace_domain = subspace_level_and_data.second.first;
-    auto &data_pointer = subspace_level_and_data.second.second;
-    // basically exclusive scan
-    data_pointer = all_subspace_data.data() + current_data_pointer_index;
-    current_data_pointer_index += subspace_domain.size();
+  for (size_t i = 0; i < subspaces_domains_and_data_pointers.capacity(); ++i) {
+    if (subspaces_domains_and_data_pointers.valid_at(i)) {
+      auto &subspace_domain =
+          subspaces_domains_and_data_pointers.value_at(i).first;
+      auto &data_pointer =
+          subspaces_domains_and_data_pointers.value_at(i).second;
+      // basically exclusive scan
+      data_pointer = all_subspace_data.data() + current_data_pointer_index;
+      current_data_pointer_index += subspace_domain.size();
+    }
   }
 
   // collect component grids onto the sparse grid
@@ -532,19 +545,23 @@ int main(int argc, char *argv[]) {
     double coefficient = all_combi_coefficients[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    for (const auto &subspace_level_and_data :
-         subspaces_domains_and_data_pointers) {
-      auto const &subspace_level = subspace_level_and_data.first;
-      auto const &subspace_domain = subspace_level_and_data.second.first;
-      auto const &data_pointer = subspace_level_and_data.second.second;
-      bool contains = true; // TODO use ddc contains domain operator
-      for (size_t d = 0; d < dimensionality; ++d) {
-        if (subspace_level[d] > level[d]) {
-          contains = false;
-          break;
+    for (size_t i = 0; i < subspaces_domains_and_data_pointers.capacity();
+         ++i) {
+      if (subspaces_domains_and_data_pointers.valid_at(i)) {
+        auto const &subspace_level = subspaces_levels.value_at(i);
+        auto const &subspace_domain =
+            subspaces_domains_and_data_pointers.value_at(i).first;
+        auto const &data_pointer =
+            subspaces_domains_and_data_pointers.value_at(i).second;
+        bool contains = true; // TODO use ddc contains domain operator
+        for (size_t d = 0; d < dimensionality; ++d) {
+          if (subspace_level[d] > level[d]) {
+            contains = false;
+            break;
+          }
         }
-      }
-      if (contains) {
+        if (contains == false)
+          continue;
         // copy data into the allocated space
         ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
                                                           subspace_domain);
@@ -564,17 +581,20 @@ int main(int argc, char *argv[]) {
   auto full_grid_view = full_grid.span_view();
 
   // now copy into full grid
-  for (const auto &subspace_level_and_data :
-       subspaces_domains_and_data_pointers) {
-    auto const &subspace_domain = subspace_level_and_data.second.first;
-    auto const &data_pointer = subspace_level_and_data.second.second;
-    ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
-                                                      subspace_domain);
-    auto subspace_view = subspace_chunk_span.span_view();
-    ddc::parallel_for_each(
-        subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
-          full_grid_view(ixyz) += subspace_view(ixyz);
-        });
+  for (size_t i = 0; i < subspaces_domains_and_data_pointers.capacity(); ++i) {
+    if (subspaces_domains_and_data_pointers.valid_at(i)) {
+      auto const &subspace_domain =
+          subspaces_domains_and_data_pointers.value_at(i).first;
+      auto const &data_pointer =
+          subspaces_domains_and_data_pointers.value_at(i).second;
+      ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
+                                                        subspace_domain);
+      auto subspace_view = subspace_chunk_span.span_view();
+      ddc::parallel_for_each(
+          subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+            full_grid_view(ixyz) += subspace_view(ixyz);
+          });
+    }
   }
 
   //   de-hierarchize on the combined full grid
@@ -590,4 +610,5 @@ int main(int argc, char *argv[]) {
   max_level_str += std::to_string(dimensionality) + "d";
   std::string const filename = "full_grid_" + max_level_str + ".raw";
   dump_chunk_span_to_binary_file(full_grid_view, filename);
+  std::cout << "Wrote full grid to " << filename << std::endl;
 }
