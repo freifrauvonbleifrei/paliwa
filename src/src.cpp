@@ -12,7 +12,10 @@
 #include <ddc/ddc.hpp>
 #include <ddc/kernels/splines.hpp>
 
+#include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
+#include <Kokkos_StdAlgorithms.hpp>
+
 
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
