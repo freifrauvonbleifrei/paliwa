@@ -366,15 +366,15 @@ void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
+  auto host_mirror_view = ddc::create_mirror_view(span);
   std::ofstream file(filename, std::ios::trunc | std::ios::binary);
-  auto chunk_size = span.size();
-  for (auto i = 0; i < chunk_size; ++i) {
-    file.write(reinterpret_cast<char *>(&span.data_handle()[i]),
-               sizeof(span.data_handle()[i]));
+  for (size_t i = 0; i < host_mirror_view.size(); ++i) {
+    file.write(reinterpret_cast<char *>(&host_mirror_view.data_handle()[i]),
+               sizeof(host_mirror_view.data_handle()[i]));
   }
 }
 
-int main(int argc, char *argv[]) {
+int main() {
   Kokkos::ScopeGuard const kokkos_scope;
   ddc::ScopeGuard const ddc_scope;
 
