@@ -214,9 +214,9 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
 }
 
 template <typename DDimInWhichToHierarchize,
-          typename DDomainType, // TODO either DDom or SDDom
+          typename DDomainType,   // TODO either DDom or SDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
-          typename LevelRange>  // TODO input_range concept
+          typename LevelRange>    // TODO input_range concept
 void transform_in(DDomainType const &strided_domain,
                   ChunkSpanType const strided_grid,
                   std::array<long int, dimensionality> const &level,
@@ -303,7 +303,8 @@ void transform_in(DDomainType const &strided_domain,
   }
 }
 
-template <typename DDimInWhichToHierarchize, typename DDomainType, typename ChunkSpanType >
+template <typename DDimInWhichToHierarchize, typename DDomainType,
+          typename ChunkSpanType>
 void hierarchize_in(DDomainType const &strided_domain,
                     ChunkSpanType const strided_grid,
                     std::array<long int, dimensionality> const &level,
@@ -324,10 +325,10 @@ void hierarchize_in(DDomainType const &strided_domain,
       lifting_wavelet_filter_offsets_and_coefficients.at("hat"));
 }
 
-template <typename DDimInWhichToHierarchize, typename DDomainType, typename ChunkSpanType>
+template <typename DDimInWhichToHierarchize, typename DDomainType,
+          typename ChunkSpanType>
 void dehierarchize_in(
-    DDomainType const &strided_domain,
-    ChunkSpanType const strided_grid,
+    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, dimensionality> const &level,
     std::array<long int, dimensionality> const &minimum_level,
     std::array<long int, dimensionality> const &maximum_level) {
@@ -578,10 +579,10 @@ int main(int argc, char *argv[]) {
   }
 
   //   de-hierarchize on the combined full grid
-  dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level, minimum_level,
-                          maximum_level);
-  dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level, minimum_level,
-                          maximum_level);
+  dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level,
+                                minimum_level, maximum_level);
+  dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level,
+                                minimum_level, maximum_level);
 
   std::string max_level_str = "";
   for (auto l : maximum_level) {
