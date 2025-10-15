@@ -428,7 +428,7 @@ int main(int argc, char *argv[]) {
   // TODO these as Kokkos unordered_map?
   std::vector<ddc::Chunk<double, SDDom>> level_data;
 
-  for (int grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
     component_grid_domains.emplace_back(
         strided_domain_from_level(level, maximum_level));
@@ -465,7 +465,7 @@ int main(int argc, char *argv[]) {
   }
 
   // hierarchize / wavelet-ify / filter in each direction
-  for (int grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     // todo this for is another potential parallel_for_each!
     auto &level = all_levels[grid_index];
     SDDom const &strided_domain = component_grid_domains[grid_index];
@@ -530,7 +530,6 @@ int main(int argc, char *argv[]) {
     // todo this for is another potential parallel_for_each!
     auto &level = all_levels[grid_index];
     double coefficient = all_combi_coefficients[grid_index];
-    SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
     for (const auto &subspace_level_and_data :
