@@ -62,19 +62,13 @@ struct DDimX : GrevillePoints<X>::interpolation_discrete_dimension_type {};
 // {
 // };
 using DElemX = ddc::DiscreteElement<DDimX>;
-using DVectX = ddc::DiscreteVector<DDimX>;
-using DDomX = ddc::StridedDiscreteDomain<DDimX>;
 
 struct DDimY : GrevillePoints<Y>::interpolation_discrete_dimension_type {};
 using DElemY = ddc::DiscreteElement<DDimY>;
-using DVectY = ddc::DiscreteVector<DDimY>;
-using DDomY = ddc::StridedDiscreteDomain<DDimY>;
 
 #if DIMENSIONALITY > 2
 struct DDimZ : GrevillePoints<Z>::interpolation_discrete_dimension_type {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
-using DVectZ = ddc::DiscreteVector<DDimZ>;
-using DDomZ = ddc::StridedDiscreteDomain<DDimZ>;
 #endif
 
 using DElemXY = ddc::DiscreteElement<DDimX, DDimY>;
@@ -87,11 +81,6 @@ using DElemXYZ = ddc::DiscreteElement<DDimX, DDimY, DDimZ>;
 using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
 using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
 using SDDomXYZ = ddc::StridedDiscreteDomain<DDimX, DDimY, DDimZ>;
-
-using DElemZYX = ddc::DiscreteElement<DDimZ, DDimY, DDimX>;
-using DVectZYX = ddc::DiscreteVector<DDimZ, DDimY, DDimX>;
-using DDomZYX = ddc::DiscreteDomain<DDimZ, DDimY, DDimX>;
-using SDDomZYX = ddc::StridedDiscreteDomain<DDimZ, DDimY, DDimX>;
 
 using DElem = DElemXYZ;
 using DVect = DVectXYZ;
@@ -126,12 +115,11 @@ SDDom strided_domain_from_level(
     std::array<long int, dimensionality> const &finest_level) {
   std::array<long int, dimensionality> resolution;
   std::ranges::transform(level, resolution.begin(),
-                         [](long int ml) { return (1 << ml); });
+                         [](long int l) { return (1 << l); });
   DVect resolution_all;
   ddc::detail::array(resolution_all) =
       resolution; // TODO temporary solution until assignment from std::array is
                   // implemented
-  // TODO special case level 0
   std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
