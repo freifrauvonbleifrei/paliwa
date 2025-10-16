@@ -352,7 +352,7 @@ void dehierarchize_in(
 template <typename T> // with T for example std::array<long int, dimensionality>
 void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
                                     size_t current_dim,
-                                    std::function<void(const T &)> callback) {
+                                    const std::function<void(const T &)>& callback) {
   assert(tmp_level.size() == nodal_level.size());
   if (current_dim < nodal_level.size()) {
     for (tmp_level[current_dim] = 0;
@@ -369,7 +369,7 @@ void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
-  auto host_mirror_view = ddc::create_mirror_view(span);
+  auto host_mirror_view = ddc::create_mirror_view_and_copy(Kokkos::HostSpace(), span);
   std::ofstream file(filename, std::ios::trunc | std::ios::binary);
   for (size_t i = 0; i < host_mirror_view.size(); ++i) {
     file.write(reinterpret_cast<char *>(&host_mirror_view.data_handle()[i]),
