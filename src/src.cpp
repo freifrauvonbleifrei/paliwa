@@ -4,13 +4,13 @@
 // see DDC's COPYRIGHT.md file
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <numeric>
 #include <ranges>
 #include <vector>
 
 #include <ddc/ddc.hpp>
-#include <ddc/kernels/splines.hpp>
 
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
@@ -47,30 +47,19 @@ struct Z {
 };
 #endif
 
-#if defined(PERIODIC_DOMAIN)
-static constexpr ddc::BoundCond BoundCond = ddc::BoundCond::PERIODIC;
-template <class DDim>
-using ExtrapolationRule = ddc::PeriodicExtrapolationRule<DDim>;
-#else
-static constexpr ddc::BoundCond BoundCond = ddc::BoundCond::GREVILLE;
-template <class DDim> using ExtrapolationRule = ddc::NullExtrapolationRule;
-#endif
 
-template <class DDim>
-using GrevillePoints =
-    ddc::GrevilleInterpolationPoints<ddc::UniformBSplines<DDim, 1>, BoundCond,
-                                     BoundCond>;
-struct DDimX : GrevillePoints<X>::interpolation_discrete_dimension_type {};
-// struct DDimX : ddc::UniformPointSampling<X>
-// {
-// };
+struct DDimX : ddc::UniformPointSampling<X>
+{
+};
 using DElemX = ddc::DiscreteElement<DDimX>;
 
-struct DDimY : GrevillePoints<Y>::interpolation_discrete_dimension_type {};
+struct DDimY : ddc::UniformPointSampling<Y> {
+};
 using DElemY = ddc::DiscreteElement<DDimY>;
 
 #if DIMENSIONALITY > 2
-struct DDimZ : GrevillePoints<Z>::interpolation_discrete_dimension_type {};
+struct DDimZ : ddc::UniformPointSampling<Z> {
+};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 #endif
 

@@ -17,7 +17,7 @@ option(DDC_BUILD_EXAMPLES         "Build DDC examples" OFF)
 option(DDC_BUILD_TESTS            "Build DDC tests if BUILD_TESTING is enabled" OFF)
 
 # follow spack env install instructions: https://ddc.mdls.fr/installation.html#autotoc_md35
-find_package(DDC REQUIRED QUIET COMPONENTS fft pdi splines)
+find_package(DDC REQUIRED QUIET COMPONENTS fft pdi)
 find_package(Kokkos REQUIRED)
 
 add_executable( test_ddc_strided src/src.cpp )
