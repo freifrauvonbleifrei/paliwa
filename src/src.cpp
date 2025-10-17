@@ -47,19 +47,14 @@ struct Z {
 };
 #endif
 
-
-struct DDimX : ddc::UniformPointSampling<X>
-{
-};
+struct DDimX : ddc::UniformPointSampling<X> {};
 using DElemX = ddc::DiscreteElement<DDimX>;
 
-struct DDimY : ddc::UniformPointSampling<Y> {
-};
+struct DDimY : ddc::UniformPointSampling<Y> {};
 using DElemY = ddc::DiscreteElement<DDimY>;
 
 #if DIMENSIONALITY > 2
-struct DDimZ : ddc::UniformPointSampling<Z> {
-};
+struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 #endif
 
@@ -339,9 +334,9 @@ void dehierarchize_in(
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
-void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
-                                    size_t current_dim,
-                                    const std::function<void(const T &)>& callback) {
+void iterate_hierarchical_subspaces(
+    const T &nodal_level, T &tmp_level, size_t current_dim,
+    const std::function<void(const T &)> &callback) {
   assert(tmp_level.size() == nodal_level.size());
   if (current_dim < nodal_level.size()) {
     for (tmp_level[current_dim] = 0;
@@ -358,7 +353,8 @@ void iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
-  auto host_mirror_view = ddc::create_mirror_view_and_copy(Kokkos::HostSpace(), span);
+  auto host_mirror_view =
+      ddc::create_mirror_view_and_copy(Kokkos::HostSpace(), span);
   std::ofstream file(filename, std::ios::trunc | std::ios::binary);
   for (size_t i = 0; i < host_mirror_view.size(); ++i) {
     file.write(reinterpret_cast<char *>(&host_mirror_view.data_handle()[i]),
@@ -418,7 +414,8 @@ int main() {
 #endif
   std::vector<SDDom> component_grid_domains;
   // TODO these as Kokkos unordered_map?
-  std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>> level_data;
+  std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
+      level_data;
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
@@ -439,7 +436,7 @@ int main() {
           double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
           strided_grid(ixyz) = std::cos(3.0 + (x + y + z));
 #else
-                strided_grid(ixyz) = std::cos(3.0 + (x + y));
+          strided_grid(ixyz) = std::cos(3.0 + (x + y));
 #endif
         });
 
