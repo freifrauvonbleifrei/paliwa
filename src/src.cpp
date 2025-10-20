@@ -249,8 +249,7 @@ void transform_in(DDomainType const &strided_domain,
       }
       auto const write_to_domain = coarsen_domain(operating_domain);
       ddc::parallel_for_each(
-          instance,
-          write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+          instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
             // check for out of bounds
             if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
@@ -294,7 +293,8 @@ void transform_in(DDomainType const &strided_domain,
 }
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
-          typename ChunkSpanType, typename ExecSpace = Kokkos::DefaultExecutionSpace>
+          typename ChunkSpanType,
+          typename ExecSpace = Kokkos::DefaultExecutionSpace>
 void hierarchize_in(DDomainType const &strided_domain,
                     ChunkSpanType const strided_grid,
                     std::array<long int, dimensionality> const &level,
@@ -316,13 +316,15 @@ void hierarchize_in(DDomainType const &strided_domain,
       lifting_wavelet_filter_offsets_and_coefficients.at("hat"), instance);
 }
 
-template < typename DDimInWhichToHierarchize, typename DDomainType,
-          typename ChunkSpanType, typename ExecSpace = Kokkos::DefaultExecutionSpace>
-void dehierarchize_in(DDomainType const &strided_domain, ChunkSpanType const strided_grid,
-    std::array<long int, dimensionality> const &level,
-    std::array<long int, dimensionality> const &minimum_level,
-    std::array<long int, dimensionality> const &maximum_level,
-    ExecSpace instance = ExecSpace()) {
+template <typename DDimInWhichToHierarchize, typename DDomainType,
+          typename ChunkSpanType,
+          typename ExecSpace = Kokkos::DefaultExecutionSpace>
+void dehierarchize_in(DDomainType const &strided_domain,
+                      ChunkSpanType const strided_grid,
+                      std::array<long int, dimensionality> const &level,
+                      std::array<long int, dimensionality> const &minimum_level,
+                      std::array<long int, dimensionality> const &maximum_level,
+                      ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
@@ -380,8 +382,8 @@ int main() {
 
   // use 32 concurrent streams
   auto instances = Kokkos::Experimental::partition_space(
-    Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
@@ -445,8 +447,8 @@ int main() {
 
     // initialize!
     ddc::parallel_for_each(
-        instances[grid_index % instances.size()],
-        component_grid_domains.back(), KOKKOS_LAMBDA(DElem const ixyz) {
+        instances[grid_index % instances.size()], component_grid_domains.back(),
+        KOKKOS_LAMBDA(DElem const ixyz) {
           double const x =
               ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
           double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
@@ -459,7 +461,7 @@ int main() {
         });
   }
   fence_all_instances(instances);
-  
+
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
@@ -600,8 +602,8 @@ int main() {
                                                           subspace_domain);
         auto subspace_view = subspace_chunk_span.span_view();
         ddc::parallel_for_each(
-            instances[i % instances.size()],
-            subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+            instances[i % instances.size()], subspace_domain,
+            KOKKOS_LAMBDA(DElem const ixyz) {
               subspace_view(ixyz) += coefficient * strided_grid(ixyz);
             });
       }
@@ -627,8 +629,8 @@ int main() {
                                                         subspace_domain);
       auto subspace_view = subspace_chunk_span.span_view();
       ddc::parallel_for_each(
-          instances[i % instances.size()],
-          subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+          instances[i % instances.size()], subspace_domain,
+          KOKKOS_LAMBDA(DElem const ixyz) {
             full_grid_view(ixyz) += subspace_view(ixyz);
           });
     }
