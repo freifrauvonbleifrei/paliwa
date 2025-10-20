@@ -203,14 +203,16 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
 template <typename DDimInWhichToHierarchize,
           typename DDomainType,   // TODO either DDom or SDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
-          typename LevelRange>    // TODO input_range concept
+          typename LevelRange,    // TODO input_range concept
+          typename ExecSpace = Kokkos::DefaultExecutionSpace>
 void transform_in(DDomainType const &strided_domain,
                   ChunkSpanType const strided_grid,
                   std::array<long int, dimensionality> const &level,
                   std::array<long int, dimensionality> const &maximum_level,
                   LevelRange const &one_d_level_range,
                   std::vector<std::pair<int, std::array<double, 3>>> const
-                      &lifting_offsets_and_coefficients) {
+                      &lifting_offsets_and_coefficients,
+                  ExecSpace instance = ExecSpace()) {
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
   auto const ddc_max_level_1d_vec =
@@ -247,6 +249,7 @@ void transform_in(DDomainType const &strided_domain,
       }
       auto const write_to_domain = coarsen_domain(operating_domain);
       ddc::parallel_for_each(
+          instance,
           write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
             // check for out of bounds
@@ -291,12 +294,13 @@ void transform_in(DDomainType const &strided_domain,
 }
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
-          typename ChunkSpanType>
+          typename ChunkSpanType, typename ExecSpace = Kokkos::DefaultExecutionSpace>
 void hierarchize_in(DDomainType const &strided_domain,
                     ChunkSpanType const strided_grid,
                     std::array<long int, dimensionality> const &level,
                     std::array<long int, dimensionality> const &minimum_level,
-                    std::array<long int, dimensionality> const &maximum_level) {
+                    std::array<long int, dimensionality> const &maximum_level,
+                    ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
@@ -309,16 +313,16 @@ void hierarchize_in(DDomainType const &strided_domain,
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, decreasing_range,
-      lifting_wavelet_filter_offsets_and_coefficients.at("hat"));
+      lifting_wavelet_filter_offsets_and_coefficients.at("hat"), instance);
 }
 
-template <typename DDimInWhichToHierarchize, typename DDomainType,
-          typename ChunkSpanType>
-void dehierarchize_in(
-    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
+template < typename DDimInWhichToHierarchize, typename DDomainType,
+          typename ChunkSpanType, typename ExecSpace = Kokkos::DefaultExecutionSpace>
+void dehierarchize_in(DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, dimensionality> const &level,
     std::array<long int, dimensionality> const &minimum_level,
-    std::array<long int, dimensionality> const &maximum_level) {
+    std::array<long int, dimensionality> const &maximum_level,
+    ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
@@ -330,7 +334,7 @@ void dehierarchize_in(
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, increasing_range,
-      lifting_wavelet_reconstruct_offsets_and_coefficients.at("hat"));
+      lifting_wavelet_reconstruct_offsets_and_coefficients.at("hat"), instance);
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
@@ -481,14 +485,15 @@ int main() {
     auto strided_grid = level_data[grid_index].span_view();
 
     hierarchize_in<DDimX>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level);
+                          maximum_level, instances[grid_index % instances.size()]);
     hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level);
+                          maximum_level, instances[grid_index % instances.size()]);
 #if DIMENSIONALITY > 2
     hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level);
+                          maximum_level, instances[grid_index % instances.size()]);
 #endif
   }
+  fence_all_instances(instances);
 
   // sparse grid!
   std::map<std::array<long int, dimensionality>, int> subspace_count;
@@ -595,12 +600,14 @@ int main() {
                                                           subspace_domain);
         auto subspace_view = subspace_chunk_span.span_view();
         ddc::parallel_for_each(
+            instances[i % instances.size()],
             subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
               subspace_view(ixyz) += coefficient * strided_grid(ixyz);
             });
       }
     }
   }
+  fence_all_instances(instances);
 
   // interpolate all onto full grid
   // allocate and initialize to 0
@@ -620,11 +627,13 @@ int main() {
                                                         subspace_domain);
       auto subspace_view = subspace_chunk_span.span_view();
       ddc::parallel_for_each(
+          instances[i % instances.size()],
           subspace_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             full_grid_view(ixyz) += subspace_view(ixyz);
           });
     }
   }
+  fence_all_instances(instances);
 
   //   de-hierarchize on the combined full grid
   dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level,
