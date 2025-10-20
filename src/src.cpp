@@ -183,11 +183,15 @@ static const std::map<std::string,
                       std::vector<std::pair<int, std::array<double, 3>>>>
     lifting_wavelet_filter_offsets_and_coefficients = {
         {"hat", {{1, {-0.5, 1.0, -0.5}}}},
+        {"biorthogonal", {{1, {-0.5, 1.0, -0.5}}, {0, {0.25, 1.0, 0.25}}}},
+        {"fullweighting", {{0, {0.25, 0.5, 0.25}}, {1, {-0.5, 1.0, -0.5}}}},
 };
 static const std::map<std::string,
                       std::vector<std::pair<int, std::array<double, 3>>>>
     lifting_wavelet_reconstruct_offsets_and_coefficients = {
         {"hat", {{1, {0.5, 1.0, 0.5}}}},
+        {"biorthogonal", {{0, {-0.25, 1.0, 0.25}}, {1, {0.5, 1.0, 0.5}}}},
+        {"fullweighting", {{1, {0.5, 1.0, 0.5}}, {0, {-0.5, 2.0, 0.5}}}},
 };
 
 template <typename InWhichDim>
@@ -240,7 +244,6 @@ void transform_in(DDomainType const &strided_domain,
       if (offset == 0) {
         coarsen_domain =
             even_strided_domain_from_domain<DDimInWhichToHierarchize>;
-        throw std::runtime_error("Offset 0 not yet implemented");
       } else if (offset == 1) {
         coarsen_domain =
             odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
@@ -252,11 +255,16 @@ void transform_in(DDomainType const &strided_domain,
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
             // check for out of bounds
-            if (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
-                    ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                        current_stride) <=
-                ddc::DiscreteElement<DDimInWhichToHierarchize>(
-                    write_to_domain.back())) {
+            if (((offset == 1) &&
+                 (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
+                      ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                          current_stride) <=
+                  ddc::DiscreteElement<DDimInWhichToHierarchize>(
+                      write_to_domain.back()))) ||
+                ((offset == 0) &&
+                 (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) >
+                  ddc::DiscreteElement<DDimInWhichToHierarchize>(
+                      lbound_all)))) {
               strided_grid(ixyz) =
                   filter[0] *
                       strided_grid(
@@ -268,24 +276,49 @@ void transform_in(DDomainType const &strided_domain,
                           ixyz + ddc::DiscreteVector<DDimInWhichToHierarchize>(
                                      current_stride));
             } else {
-              // on the upper boundary, no +1 available
-              // TODO make separate step to avoid branch here
-              DElem wraparound;
-              if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
-                wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
-              } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
-                                                  DDimY>) {
-                wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
+              if (offset == 1) {
+                // on the upper boundary, no +1 available
+                // TODO make separate step to avoid branch here
+                DElem wraparound;
+                if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+                  wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
+                } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                                                    DDimY>) {
+                  wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
+                } else {
+                  static_assert("Not implemented for this dimension");
+                }
+                strided_grid(ixyz) =
+                    filter[0] *
+                        strided_grid(
+                            ixyz -
+                            ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                                current_stride)) +
+                    filter[1] * strided_grid(ixyz) +
+                    filter[2] * strided_grid(wraparound);
+
               } else {
-                static_assert("Not implemented for this dimension");
+                // on the lower boundary, no -1 available
+                DElem wraparound;
+                if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+                  wraparound =
+                      DElem(DElemX(operating_domain.back()), DElemY(ixyz));
+                } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                                                    DDimY>) {
+                  wraparound =
+                      DElem(DElemX(ixyz), DElemY(operating_domain.back()));
+                } else {
+                  static_assert("Not implemented for this dimension");
+                }
+                strided_grid(ixyz) =
+                    filter[0] * strided_grid(wraparound) +
+                    filter[1] * strided_grid(ixyz) +
+                    filter[2] *
+                        strided_grid(
+                            ixyz +
+                            ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                                current_stride));
               }
-              strided_grid(ixyz) =
-                  filter[0] *
-                      strided_grid(
-                          ixyz - ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                                     current_stride)) +
-                  filter[1] * strided_grid(ixyz) +
-                  filter[2] * strided_grid(wraparound);
             }
           });
     }
@@ -300,6 +333,7 @@ void hierarchize_in(DDomainType const &strided_domain,
                     std::array<long int, dimensionality> const &level,
                     std::array<long int, dimensionality> const &minimum_level,
                     std::array<long int, dimensionality> const &maximum_level,
+                    std::string const &wavelet_name = "hat",
                     ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
@@ -313,7 +347,8 @@ void hierarchize_in(DDomainType const &strided_domain,
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, decreasing_range,
-      lifting_wavelet_filter_offsets_and_coefficients.at("hat"), instance);
+      lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
+      instance);
 }
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
@@ -324,6 +359,7 @@ void dehierarchize_in(DDomainType const &strided_domain,
                       std::array<long int, dimensionality> const &level,
                       std::array<long int, dimensionality> const &minimum_level,
                       std::array<long int, dimensionality> const &maximum_level,
+                      std::string const &wavelet_name = "hat",
                       ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
@@ -336,7 +372,8 @@ void dehierarchize_in(DDomainType const &strided_domain,
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, increasing_range,
-      lifting_wavelet_reconstruct_offsets_and_coefficients.at("hat"), instance);
+      lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
+      instance);
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
@@ -479,6 +516,7 @@ int main() {
     ddc::print_content(std::cout, strided_grid) << std::endl;
   }
 
+  std::string const wavelet_name = "biorthogonal";
   // hierarchize / wavelet-ify / filter in each direction
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     // todo this for is another potential parallel_for_each!
@@ -487,12 +525,15 @@ int main() {
     auto strided_grid = level_data[grid_index].span_view();
 
     hierarchize_in<DDimX>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, instances[grid_index % instances.size()]);
+                          maximum_level, wavelet_name,
+                          instances[grid_index % instances.size()]);
     hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, instances[grid_index % instances.size()]);
+                          maximum_level, wavelet_name,
+                          instances[grid_index % instances.size()]);
 #if DIMENSIONALITY > 2
     hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, instances[grid_index % instances.size()]);
+                          maximum_level, wavelet_name,
+                          instances[grid_index % instances.size()]);
 #endif
   }
   fence_all_instances(instances);
@@ -639,9 +680,9 @@ int main() {
 
   //   de-hierarchize on the combined full grid
   dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level);
+                                minimum_level, maximum_level, wavelet_name);
   dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level);
+                                minimum_level, maximum_level, wavelet_name);
 
   std::string max_level_str = "";
   for (auto l : maximum_level) {
