@@ -362,9 +362,22 @@ void dump_chunk_span_to_binary_file(ChunkType const span,
   }
 }
 
+template <typename InstancesType>
+void fence_all_instances(InstancesType const &instances) {
+  for (auto const &instance : instances) {
+    instance.fence();
+  }
+}
+
 int main() {
   Kokkos::ScopeGuard const kokkos_scope;
   ddc::ScopeGuard const ddc_scope;
+  Kokkos::print_configuration(std::cout);
+
+  // use 32 concurrent streams
+  auto instances = Kokkos::Experimental::partition_space(
+    Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
@@ -428,6 +441,7 @@ int main() {
 
     // initialize!
     ddc::parallel_for_each(
+        instances[grid_index % instances.size()],
         component_grid_domains.back(), KOKKOS_LAMBDA(DElem const ixyz) {
           double const x =
               ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
@@ -439,6 +453,12 @@ int main() {
           strided_grid(ixyz) = std::cos(3.0 + (x + y));
 #endif
         });
+  }
+  fence_all_instances(instances);
+  
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    auto &level = all_levels[grid_index];
+    auto strided_grid = level_data[grid_index].span_view();
 
     // TODO how easiest for visualizable output? pdi? raw ofstream? (-> raw
     // ofstream for now)
