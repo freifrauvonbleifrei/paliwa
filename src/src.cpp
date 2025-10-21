@@ -11,11 +11,11 @@
 #include <vector>
 
 #include <ddc/ddc.hpp>
+#include <mpi.h>
 
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
-
 
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
@@ -303,12 +303,10 @@ void transform_in(DDomainType const &strided_domain,
                 auto const domain_back = operating_domain.back();
                 DElem wraparound;
                 if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
-                  wraparound =
-                      DElem(DElemX(domain_back), DElemY(ixyz));
+                  wraparound = DElem(DElemX(domain_back), DElemY(ixyz));
                 } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
                                                     DDimY>) {
-                  wraparound =
-                      DElem(DElemX(ixyz), DElemY(domain_back));
+                  wraparound = DElem(DElemX(ixyz), DElemY(domain_back));
                 } else {
                   static_assert("Not implemented for this dimension");
                 }
@@ -407,6 +405,96 @@ void dump_chunk_span_to_binary_file(ChunkType const span,
   }
 }
 
+template <class HeadTag>
+static ddc::DiscreteDomain<HeadTag>
+distribute_idx_range(ddc::DiscreteDomain<HeadTag> global_idx_range,
+                     DVect const &par_vector, DVect const &my_coords) {
+  if (global_idx_range.size() % par_vector.get<HeadTag>() != 0) {
+    throw std::runtime_error(
+        "The provided index range cannot be split equally over "
+        "the specified number of MPI ranks.");
+  }
+  ddc::DiscreteVector<HeadTag> elems_on_dim(global_idx_range.size() /
+                                            par_vector.get<HeadTag>());
+  ddc::DiscreteDomain<HeadTag> last_dim_local_idx_range(
+      global_idx_range.front() + my_coords.get<HeadTag>() * elems_on_dim,
+      elems_on_dim);
+  return last_dim_local_idx_range;
+}
+
+template <class HeadTag, class... Tags,
+          std::enable_if_t<(sizeof...(Tags) > 0), bool> = true>
+static ddc::DiscreteDomain<HeadTag, Tags...>
+distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
+                     DVect const &par_vector, DVect const &my_coords) {
+  ddc::DiscreteDomain<HeadTag> global_idx_range_along_dim =
+      ddc::select<HeadTag>(global_idx_range);
+  ddc::DiscreteDomain<HeadTag> local_idx_range_along_dim;
+  ddc::DiscreteDomain<Tags...> remaining_idx_range;
+
+  // The number of MPI processes along this dimension
+  auto n_ranks_along_dim = ddc::DiscreteVector<HeadTag>(par_vector);
+  auto rank_along_dim = ddc::DiscreteVector<HeadTag>(my_coords);
+  // Calculate the local index range
+  if (global_idx_range_along_dim.size() % n_ranks_along_dim != 0) {
+    throw std::runtime_error(
+        "The provided index range cannot be split equally over "
+        "the specified number of MPI ranks.");
+  }
+
+  ddc::DiscreteVector<HeadTag> elems_on_dim(global_idx_range_along_dim.size() /
+                                            n_ranks_along_dim);
+  ddc::DiscreteElement<HeadTag> distrib_start(
+      global_idx_range_along_dim.front() + rank_along_dim * elems_on_dim);
+  local_idx_range_along_dim =
+      ddc::DiscreteDomain<HeadTag>(distrib_start, elems_on_dim);
+  // Calculate the index range for the subsequent dimensions
+  ddc::DiscreteDomain<Tags...> remaining_dims =
+      ddc::select<Tags...>(global_idx_range);
+  remaining_idx_range =
+      distribute_idx_range(remaining_dims, par_vector, my_coords);
+  return ddc::DiscreteDomain<HeadTag, Tags...>(local_idx_range_along_dim,
+                                               remaining_idx_range);
+}
+
+DDom decompose_domain_on_communicator(
+    DDom const &global_domain, MPI_Comm comm,
+    std::array<int, dimensionality> const &par_vector) {
+  static_assert(ddc::is_discrete_domain_v<DDom>);
+#ifndef NDEBUG
+  assert(dimensionality == par_vector.size());
+  assert(dimensionality == global_domain.rank());
+  auto num_procs = std::reduce(std::begin(par_vector), std::end(par_vector), 1,
+                               std::multiplies<int>());
+  int comm_size = -1;
+  MPI_Comm_size(comm, &comm_size);
+  assert(num_procs == comm_size);
+#endif // NDEBUG
+  std::array<int, dimensionality> periods;
+  for (size_t i = 0; i < dimensionality; ++i) {
+    periods[i] = 1;
+  }
+  int reorder = true;
+  MPI_Comm comm_cart = MPI_COMM_NULL;
+
+  MPI_Cart_create(comm, static_cast<int>(dimensionality), par_vector.data(),
+                  periods.data(), reorder, &comm_cart);
+  int my_rank = -1;
+  MPI_Comm_rank(comm_cart, &my_rank);
+  std::array<int, dimensionality> my_coords;
+  MPI_Cart_coords(comm_cart, my_rank, static_cast<int>(dimensionality),
+                  my_coords.data());
+
+  DVect par_vector_dv;
+  std::ranges::transform(par_vector, ddc::detail::array(par_vector_dv).begin(),
+                         [](int i) { return static_cast<long int>(i); });
+  DVect my_coords_dv;
+  std::ranges::transform(my_coords, ddc::detail::array(my_coords_dv).begin(),
+                         [](int i) { return static_cast<long int>(i); });
+  // dimension-recursive call
+  return distribute_idx_range(global_domain, par_vector_dv, my_coords_dv);
+}
+
 template <typename InstancesType>
 void fence_all_instances(InstancesType const &instances) {
   for (auto const &instance : instances) {
@@ -415,11 +503,12 @@ void fence_all_instances(InstancesType const &instances) {
 }
 
 int main() {
+  MPI_Init(0, nullptr);
   Kokkos::ScopeGuard const kokkos_scope;
   ddc::ScopeGuard const ddc_scope;
   Kokkos::print_configuration(std::cout);
 
-  // use 32 concurrent streams
+  // use up to 32 concurrent streams
   auto instances = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
@@ -458,6 +547,18 @@ int main() {
 #else
   DDom const dom_all(x_domain, y_domain);
 #endif
+  std::array<int, dimensionality> parallelization_vector = {2, 2};
+  DDom const local_domain = decompose_domain_on_communicator(
+      dom_all, MPI_COMM_WORLD, parallelization_vector);
+
+  for (int i = 0; i < world_size; ++i) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (i == world_rank) {
+      std::cout << "rank " << world_rank << " : " << std::endl;
+      std::cout << " local domain: " << ddc::coordinate(local_domain.front())
+                << " " << ddc::coordinate(local_domain.back()) << std::endl;
+    }
+  }
 
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const minimum_level = {4, 5, 6};
@@ -470,6 +571,7 @@ int main() {
       {2, 5}, {3, 4}, {4, 3}, {2, 4}, {3, 3}};
   std::vector<double> all_combi_coefficients = {1, 1, 1, -1, -1};
 #endif
+  assert(all_levels.size() == all_combi_coefficients.size());
   std::vector<SDDom> component_grid_domains;
   // TODO these as Kokkos unordered_map?
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
@@ -694,4 +796,15 @@ int main() {
   std::string const filename = "full_grid_" + max_level_str + ".raw";
   dump_chunk_span_to_binary_file(full_grid_view, filename);
   std::cout << "Wrote full grid to " << filename << std::endl;
+  double const mean_value =
+      ddc::parallel_transform_reduce(dom_all, 0., ddc::reducer::sum<double>(),
+                                     full_grid_view) /
+      dom_all.size();
+  std::cout << "Mean value on finest grid: " << mean_value << std::endl;
+  if (std::abs(mean_value - (-0.650446)) > 1e-6) {
+    std::cerr << "Error: mean value does not match expected value!"
+              << std::endl;
+    return 1;
+  }
+  MPI_Finalize();
 }
