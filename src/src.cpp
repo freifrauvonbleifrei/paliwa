@@ -251,6 +251,7 @@ void transform_in(DDomainType const &strided_domain,
         throw std::runtime_error("Filter offset not supported");
       }
       auto const write_to_domain = coarsen_domain(operating_domain);
+
       ddc::parallel_for_each(
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
@@ -299,14 +300,15 @@ void transform_in(DDomainType const &strided_domain,
 
               } else {
                 // on the lower boundary, no -1 available
+                auto const domain_back = operating_domain.back();
                 DElem wraparound;
                 if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
                   wraparound =
-                      DElem(DElemX(operating_domain.back()), DElemY(ixyz));
+                      DElem(DElemX(domain_back), DElemY(ixyz));
                 } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
                                                     DDimY>) {
                   wraparound =
-                      DElem(DElemX(ixyz), DElemY(operating_domain.back()));
+                      DElem(DElemX(ixyz), DElemY(domain_back));
                 } else {
                   static_assert("Not implemented for this dimension");
                 }
