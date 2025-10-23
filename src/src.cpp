@@ -506,25 +506,10 @@ template <int8_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
-  // TODO implement
-}
-
-int main() {
-  MPI_Init(0, nullptr);
-  Kokkos::ScopeGuard const kokkos_scope;
-  ddc::ScopeGuard const ddc_scope;
-  Kokkos::print_configuration(std::cout);
-
-  // use up to 32 concurrent streams
-  auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-
-  run_combination_technique<dimensionality>(instances, MPI_COMM_WORLD);
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
 #else
-  std::array<long int, dimensionality> const maximum_level = {4, 5};
+  std::array<long int, dimensionality> const maximum_level = {10, 11};
 #endif
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
@@ -556,17 +541,8 @@ int main() {
   DDom const dom_all(x_domain, y_domain);
 #endif
   std::array<int, dimensionality> parallelization_vector = {2, 2};
-  DDom const local_domain = decompose_domain_on_communicator(
-      dom_all, MPI_COMM_WORLD, parallelization_vector);
-
-  for (int i = 0; i < world_size; ++i) {
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (i == world_rank) {
-      std::cout << "rank " << world_rank << " : " << std::endl;
-      std::cout << " local domain: " << ddc::coordinate(local_domain.front())
-                << " " << ddc::coordinate(local_domain.back()) << std::endl;
-    }
-  }
+  DDom const local_domain =
+      decompose_domain_on_communicator(dom_all, comm, parallelization_vector);
 
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const minimum_level = {4, 5, 6};
@@ -576,12 +552,13 @@ int main() {
 #else
   std::array<long int, dimensionality> const minimum_level = {2, 3};
   std::vector<std::array<long int, dimensionality>> all_levels = {
-      {2, 5}, {3, 4}, {4, 3}, {2, 4}, {3, 3}};
-  std::vector<double> all_combi_coefficients = {1, 1, 1, -1, -1};
+      {2, 11}, {3, 10}, {4, 9}, {5, 8}, {6, 7}, {7, 6}, {8, 5}, {9, 4}, {10, 3},
+      {2, 10}, {3, 9},  {4, 8}, {5, 7}, {6, 6}, {7, 5}, {8, 4}, {9, 3}};
+  std::vector<double> all_combi_coefficients = {
+      1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1};
 #endif
   assert(all_levels.size() == all_combi_coefficients.size());
   std::vector<SDDom> component_grid_domains;
-  // TODO these as Kokkos unordered_map?
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data;
 
@@ -804,9 +781,22 @@ int main() {
       dom_all.size();
   std::cout << "Mean value on finest grid: " << mean_value << std::endl;
   if (std::abs(mean_value - (-0.650446)) > 1e-6) {
-    std::cerr << "Error: mean value does not match expected value!"
-              << std::endl;
-    return 1;
+    throw std::runtime_error(
+        "Error: mean value does not match expected value!");
   }
+}
+
+int main() {
+  MPI_Init(0, nullptr);
+  Kokkos::ScopeGuard const kokkos_scope;
+  ddc::ScopeGuard const ddc_scope;
+
+  // use up to 32 concurrent streams
+  auto instances = Kokkos::Experimental::partition_space(
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+
+  run_combination_technique<dimensionality>(instances, MPI_COMM_WORLD);
+
   MPI_Finalize();
 }
