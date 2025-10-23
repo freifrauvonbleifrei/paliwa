@@ -37,7 +37,6 @@ struct Y {
   static constexpr bool PERIODIC = false;
 #endif
 };
-#if DIMENSIONALITY > 2
 struct Z {
 #if defined(PERIODIC_DOMAIN)
   static constexpr bool PERIODIC = true;
@@ -45,7 +44,6 @@ struct Z {
   static constexpr bool PERIODIC = false;
 #endif
 };
-#endif
 
 struct DDimX : ddc::UniformPointSampling<X> {};
 using DElemX = ddc::DiscreteElement<DDimX>;
@@ -53,22 +51,20 @@ using DElemX = ddc::DiscreteElement<DDimX>;
 struct DDimY : ddc::UniformPointSampling<Y> {};
 using DElemY = ddc::DiscreteElement<DDimY>;
 
-#if DIMENSIONALITY > 2
 struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
-#endif
 
 using DElemXY = ddc::DiscreteElement<DDimX, DDimY>;
 using DVectXY = ddc::DiscreteVector<DDimX, DDimY>;
 using DDomXY = ddc::DiscreteDomain<DDimX, DDimY>;
 using SDDomXY = ddc::StridedDiscreteDomain<DDimX, DDimY>;
 
-#if DIMENSIONALITY > 2
 using DElemXYZ = ddc::DiscreteElement<DDimX, DDimY, DDimZ>;
 using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
 using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
 using SDDomXYZ = ddc::StridedDiscreteDomain<DDimX, DDimY, DDimZ>;
 
+#if DIMENSIONALITY > 2
 using DElem = DElemXYZ;
 using DVect = DVectXYZ;
 using DDom = DDomXYZ;
@@ -506,11 +502,14 @@ template <int8_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
-#if DIMENSIONALITY > 2
-  std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
-#else
-  std::array<long int, dimensionality> const maximum_level = {10, 11};
-#endif
+  std::array<long int, dimensionality> maximum_level;
+  if constexpr (dimensionality == 3) {
+    maximum_level = {5, 6, 7};
+  } else if constexpr (dimensionality == 2) {
+    maximum_level = {10, 11};
+  } else {
+    throw std::runtime_error("Dimensionality not supported");
+  }
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
                  [](int ml) { return (1 << ml) + 1; });
@@ -529,34 +528,38 @@ void run_combination_technique(
                          ddc::DiscreteVector<DDimY>(resolution[1])));
   ddc::DiscreteDomain<DDimY> const y_domain =
       y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
-#if DIMENSIONALITY > 2
-  auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(
-      DDimZ::init<DDimZ>(ddc::Coordinate<Z>(z_start), ddc::Coordinate<Z>(z_end),
-                         ddc::DiscreteVector<DDimZ>(resolution[2])));
-  ddc::DiscreteDomain<DDimZ> const z_domain =
-      z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
+  DDom dom_all;
+  if constexpr (dimensionality == 3) {
+    auto const z_domain_with_periodic_point =
+        ddc::init_discrete_space<DDimZ>(DDimZ::init<DDimZ>(
+            ddc::Coordinate<Z>(z_start), ddc::Coordinate<Z>(z_end),
+            ddc::DiscreteVector<DDimZ>(resolution[2])));
+    ddc::DiscreteDomain<DDimZ> const z_domain =
+        z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
 
-  DDom const dom_all(x_domain, y_domain, z_domain);
-#else
-  DDom const dom_all(x_domain, y_domain);
-#endif
+    dom_all = DDom(x_domain, y_domain, z_domain);
+  } else if constexpr (dimensionality == 2) {
+    dom_all = DDom(x_domain, y_domain);
+  }
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   DDom const local_domain =
       decompose_domain_on_communicator(dom_all, comm, parallelization_vector);
 
-#if DIMENSIONALITY > 2
-  std::array<long int, dimensionality> const minimum_level = {4, 5, 6};
-  std::vector<std::array<long int, dimensionality>> all_levels = {
-      {4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
-  std::vector<double> all_combi_coefficients = {1, 1, 1, -2};
-#else
-  std::array<long int, dimensionality> const minimum_level = {2, 3};
-  std::vector<std::array<long int, dimensionality>> all_levels = {
-      {2, 11}, {3, 10}, {4, 9}, {5, 8}, {6, 7}, {7, 6}, {8, 5}, {9, 4}, {10, 3},
-      {2, 10}, {3, 9},  {4, 8}, {5, 7}, {6, 6}, {7, 5}, {8, 4}, {9, 3}};
-  std::vector<double> all_combi_coefficients = {
-      1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1, -1};
-#endif
+  std::array<long int, dimensionality> minimum_level;
+  std::vector<std::array<long int, dimensionality>> all_levels;
+  std::vector<double> all_combi_coefficients;
+  if constexpr (dimensionality == 3) {
+    minimum_level = {4, 5, 6};
+    all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
+    all_combi_coefficients = {1, 1, 1, -2};
+  } else if constexpr (dimensionality == 2) {
+    minimum_level = {2, 3};
+    all_levels = {{2, 11}, {3, 10}, {4, 9},  {5, 8},  {6, 7}, {7, 6},
+                  {8, 5},  {9, 4},  {10, 3}, {2, 10}, {3, 9}, {4, 8},
+                  {5, 7},  {6, 6},  {7, 5},  {8, 4},  {9, 3}};
+    all_combi_coefficients = {1,  1,  1,  1,  1,  1,  1,  1, 1,
+                              -1, -1, -1, -1, -1, -1, -1, -1};
+  }
   assert(all_levels.size() == all_combi_coefficients.size());
   std::vector<SDDom> component_grid_domains;
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
@@ -578,12 +581,14 @@ void run_combination_technique(
           double const x =
               ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
           double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
-#if DIMENSIONALITY > 2
-          double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
-          strided_grid(ixyz) = std::cos(3.0 + (x + y + z));
-#else
-          strided_grid(ixyz) = std::cos(3.0 + (x + y));
-#endif
+          double result;
+          if constexpr (dimensionality == 3) {
+            double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
+            result = std::cos(3.0 + (x + y + z));
+          } else if constexpr (dimensionality == 2) {
+            result = std::cos(3.0 + (x + y));
+          }
+          strided_grid(ixyz) = result;
         });
   }
   fence_all_instances(instances);
@@ -619,11 +624,11 @@ void run_combination_technique(
     hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
                           maximum_level, wavelet_name,
                           instances[grid_index % instances.size()]);
-#if DIMENSIONALITY > 2
-    hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, wavelet_name,
-                          instances[grid_index % instances.size()]);
-#endif
+    if constexpr (dimensionality > 2) {
+      hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
+                            maximum_level, wavelet_name,
+                            instances[grid_index % instances.size()]);
+    }
   }
   fence_all_instances(instances);
 
