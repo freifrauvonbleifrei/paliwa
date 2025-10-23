@@ -397,7 +397,7 @@ template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
   auto host_mirror_view =
-      ddc::create_mirror_view_and_copy(Kokkos::HostSpace(), span);
+      ddc::create_mirror_view_and_copy(Kokkos::SharedHostPinnedSpace(), span);
   std::ofstream file(filename, std::ios::trunc | std::ios::binary);
   for (size_t i = 0; i < host_mirror_view.size(); ++i) {
     file.write(reinterpret_cast<char *>(&host_mirror_view.data_handle()[i]),
@@ -668,17 +668,11 @@ int main() {
   // leads to weird hangup (different type w/ hash function?)!!
   // auto subspaces_levels_host = Kokkos::create_mirror(subspaces_levels);
   Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
-                       Kokkos::DefaultHostExecutionSpace>
+                       Kokkos::SharedHostPinnedSpace>
       subspaces_levels_host(subspace_count.size());
   Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
-                       Kokkos::DefaultHostExecutionSpace>
+                       Kokkos::SharedHostPinnedSpace>
       subspaces_domains_and_data_pointers_host(subspace_count.size());
-  if constexpr (std::is_same_v<Kokkos::DefaultExecutionSpace,
-                               Kokkos::DefaultHostExecutionSpace>) {
-    subspaces_levels_host = subspaces_levels;
-    subspaces_domains_and_data_pointers_host =
-        subspaces_domains_and_data_pointers;
-  }
 
   size_t accumulated_size = 0;
   size_t used_subspace_number = 0;
