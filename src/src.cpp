@@ -20,7 +20,6 @@
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
 #define DIMENSIONALITY 2
-static constexpr int8_t dimensionality = DIMENSIONALITY;
 
 struct X {
 #if defined(PERIODIC_DOMAIN)
@@ -93,6 +92,7 @@ double const y_end = 1.;
 double const z_start = 0.;
 double const z_end = 1.;
 
+template <size_t dimensionality>
 SDDom strided_domain_from_level(
     std::array<long int, dimensionality> const &level,
     std::array<long int, dimensionality> const &finest_level) {
@@ -114,6 +114,7 @@ SDDom strided_domain_from_level(
   return SDDom(lbound_all, resolution_all, strides_all);
 }
 
+template <size_t dimensionality>
 SDDom strided_hierarchical_domain_from_level(
     std::array<long int, dimensionality> const &level,
     std::array<long int, dimensionality> const &finest_level) {
@@ -190,7 +191,7 @@ static const std::map<std::string,
         {"fullweighting", {{1, {0.5, 1.0, 0.5}}, {0, {-0.5, 2.0, -0.5}}}},
 };
 
-template <typename InWhichDim>
+template <typename InWhichDim, size_t dimensionality>
 ddc::DiscreteVector<InWhichDim>
 get_dimension_component(std::array<long int, dimensionality> const &level) {
   DVect ddc_level;
@@ -207,8 +208,8 @@ template <typename DDimInWhichToHierarchize,
           typename ExecSpace = Kokkos::DefaultExecutionSpace>
 void transform_in(DDomainType const &strided_domain,
                   ChunkSpanType const strided_grid,
-                  std::array<long int, dimensionality> const &level,
-                  std::array<long int, dimensionality> const &maximum_level,
+                  std::array<long int, DDomainType::rank()> const &level,
+                  std::array<long int, DDomainType::rank()> const &maximum_level,
                   LevelRange const &one_d_level_range,
                   std::vector<std::pair<int, std::array<double, 3>>> const
                       &lifting_offsets_and_coefficients,
@@ -324,13 +325,12 @@ void transform_in(DDomainType const &strided_domain,
 template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
           typename ExecSpace = Kokkos::DefaultExecutionSpace>
-void hierarchize_in(DDomainType const &strided_domain,
-                    ChunkSpanType const strided_grid,
-                    std::array<long int, dimensionality> const &level,
-                    std::array<long int, dimensionality> const &minimum_level,
-                    std::array<long int, dimensionality> const &maximum_level,
-                    std::string const &wavelet_name = "hat",
-                    ExecSpace instance = ExecSpace()) {
+void hierarchize_in(
+    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
+    std::array<long int, DDomainType::rank()> const &level,
+    std::array<long int, DDomainType::rank()> const &minimum_level,
+    std::array<long int, DDomainType::rank()> const &maximum_level,
+    std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
@@ -350,13 +350,12 @@ void hierarchize_in(DDomainType const &strided_domain,
 template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
           typename ExecSpace = Kokkos::DefaultExecutionSpace>
-void dehierarchize_in(DDomainType const &strided_domain,
-                      ChunkSpanType const strided_grid,
-                      std::array<long int, dimensionality> const &level,
-                      std::array<long int, dimensionality> const &minimum_level,
-                      std::array<long int, dimensionality> const &maximum_level,
-                      std::string const &wavelet_name = "hat",
-                      ExecSpace instance = ExecSpace()) {
+void dehierarchize_in(
+    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
+    std::array<long int, DDomainType::rank()> const &level,
+    std::array<long int, DDomainType::rank()> const &minimum_level,
+    std::array<long int, DDomainType::rank()> const &maximum_level,
+    std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
@@ -453,13 +452,15 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
                                                remaining_idx_range);
 }
 
-DDom decompose_domain_on_communicator(
-    DDom const &global_domain, MPI_Comm comm,
-    std::array<int, dimensionality> const &par_vector) {
-  static_assert(ddc::is_discrete_domain_v<DDom>);
+template <typename DiscreteDomainType>
+DiscreteDomainType decompose_domain_on_communicator(
+    DiscreteDomainType const &global_domain, MPI_Comm comm,
+    std::array<int, DiscreteDomainType::rank()> const &par_vector) {
+  static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,
+                "DiscreteDomainType must be a DDC discrete domain type");
 #ifndef NDEBUG
+  constexpr size_t dimensionality = DiscreteDomainType::rank();
   assert(dimensionality == par_vector.size());
-  assert(dimensionality == global_domain.rank());
   auto num_procs = std::reduce(std::begin(par_vector), std::end(par_vector), 1,
                                std::multiplies<int>());
   int comm_size = -1;
@@ -498,7 +499,7 @@ void fence_all_instances(InstancesType const &instances) {
   }
 }
 
-template <int8_t dimensionality>
+template <size_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
@@ -801,7 +802,7 @@ int main() {
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
-  run_combination_technique<dimensionality>(instances, MPI_COMM_WORLD);
+  run_combination_technique<DIMENSIONALITY>(instances, MPI_COMM_WORLD);
 
   MPI_Finalize();
 }
