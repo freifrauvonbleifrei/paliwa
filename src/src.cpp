@@ -502,6 +502,13 @@ void fence_all_instances(InstancesType const &instances) {
   }
 }
 
+template <int8_t dimensionality>
+void run_combination_technique(
+    std::vector<Kokkos::DefaultExecutionSpace> const &instances,
+    MPI_Comm comm) {
+  // TODO implement
+}
+
 int main() {
   MPI_Init(0, nullptr);
   Kokkos::ScopeGuard const kokkos_scope;
@@ -513,6 +520,7 @@ int main() {
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
+  run_combination_technique<dimensionality>(instances, MPI_COMM_WORLD);
 #if DIMENSIONALITY > 2
   std::array<long int, dimensionality> const maximum_level = {5, 6, 7};
 #else
