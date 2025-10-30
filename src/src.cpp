@@ -184,7 +184,7 @@ get_dimension_component(std::array<long int, dimensionality> const &level) {
   return ddc::DiscreteVector<InWhichDim>(ddc_level);
 }
 
-template <typename DDimInWhichToHierarchize,
+template <typename DDimInWhichToTransform,
           typename DDomainType,   // TODO either DDom or SDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
           typename LevelRange,    // TODO input_range concept
@@ -205,14 +205,14 @@ void transform_in(
       std::is_same_v<typename DDomainType::discrete_element_type, DElem>,
       "Mismatch between DDomainType and DDims...");
   auto const ddc_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(level);
+      get_dimension_component<DDimInWhichToTransform>(level);
   auto const ddc_max_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(maximum_level);
+      get_dimension_component<DDimInWhichToTransform>(maximum_level);
 
   // check the finest stride, if DDomainType is SDDom
   if constexpr (std::is_same_v<DDomainType, SDDom>) {
     assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
-           strided_domain.strides().template get<DDimInWhichToHierarchize>());
+           strided_domain.strides().template get<DDimInWhichToTransform>());
   }
 
   ddc::DiscreteVector<DDims...> current_level;
@@ -222,7 +222,7 @@ void transform_in(
 
   for (long int current_1d_level : one_d_level_range) {
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
-    current_level.template get<DDimInWhichToHierarchize>() = current_1d_level;
+    current_level.template get<DDimInWhichToTransform>() = current_1d_level;
     auto const operating_domain = strided_domain_from_level(
         ddc::detail::array(current_level), maximum_level, lbound);
 
@@ -230,11 +230,11 @@ void transform_in(
       std::function<SDDom(SDDom const &)> coarsen_domain;
       if (offset == 0) {
         coarsen_domain = std::bind(
-            even_strided_domain_from_domain<DDimInWhichToHierarchize, DDims...>,
+            even_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
             std::placeholders::_1, lbound);
       } else if (offset == 1) {
         coarsen_domain = std::bind(
-            odd_strided_domain_from_domain<DDimInWhichToHierarchize, DDims...>,
+            odd_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
             std::placeholders::_1, lbound);
       } else {
         throw std::runtime_error("Filter offset not supported");
@@ -246,32 +246,32 @@ void transform_in(
             // how to access / slice at every other point in x?
             // check for out of bounds
             if (((offset == 1) &&
-                 (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) +
-                      ddc::DiscreteVector<DDimInWhichToHierarchize>(
+                 (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
+                      ddc::DiscreteVector<DDimInWhichToTransform>(
                           current_stride) <=
-                  ddc::DiscreteElement<DDimInWhichToHierarchize>(
+                  ddc::DiscreteElement<DDimInWhichToTransform>(
                       write_to_domain.back()))) ||
                 ((offset == 0) &&
-                 (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) >
-                  ddc::DiscreteElement<DDimInWhichToHierarchize>(lbound)))) {
+                 (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) >
+                  ddc::DiscreteElement<DDimInWhichToTransform>(lbound)))) {
               strided_grid(ixyz) =
                   filter[0] *
-                      strided_grid(
-                          ixyz - ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                                     current_stride)) +
+                      strided_grid(ixyz -
+                                   ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride)) +
                   filter[1] * strided_grid(ixyz) +
                   filter[2] *
-                      strided_grid(
-                          ixyz + ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                                     current_stride));
+                      strided_grid(ixyz +
+                                   ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride));
             } else {
               if (offset == 1) {
                 // on the upper boundary, no +1 available
                 // TODO make separate step to avoid branch here
                 DElem wraparound;
-                if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+                if constexpr (std::is_same_v<DDimInWhichToTransform, DDimX>) {
                   wraparound = DElem(DElemX(lbound), DElemY(ixyz));
-                } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                } else if constexpr (std::is_same_v<DDimInWhichToTransform,
                                                     DDimY>) {
                   wraparound = DElem(DElemX(ixyz), DElemY(lbound));
                 } else {
@@ -280,9 +280,8 @@ void transform_in(
                 strided_grid(ixyz) =
                     filter[0] *
                         strided_grid(
-                            ixyz -
-                            ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                                current_stride)) +
+                            ixyz - ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride)) +
                     filter[1] * strided_grid(ixyz) +
                     filter[2] * strided_grid(wraparound);
 
@@ -290,9 +289,9 @@ void transform_in(
                 // on the lower boundary, no -1 available
                 auto const domain_back = operating_domain.back();
                 DElem wraparound;
-                if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
+                if constexpr (std::is_same_v<DDimInWhichToTransform, DDimX>) {
                   wraparound = DElem(DElemX(domain_back), DElemY(ixyz));
-                } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
+                } else if constexpr (std::is_same_v<DDimInWhichToTransform,
                                                     DDimY>) {
                   wraparound = DElem(DElemX(ixyz), DElemY(domain_back));
                 } else {
@@ -303,9 +302,8 @@ void transform_in(
                     filter[1] * strided_grid(ixyz) +
                     filter[2] *
                         strided_grid(
-                            ixyz +
-                            ddc::DiscreteVector<DDimInWhichToHierarchize>(
-                                current_stride));
+                            ixyz + ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride));
               }
             }
           });
