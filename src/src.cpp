@@ -64,24 +64,11 @@ using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
 using SDDomXYZ = ddc::StridedDiscreteDomain<DDimX, DDimY, DDimZ>;
 
 #if DIMENSIONALITY > 2
-using DElem = DElemXYZ;
-using DVect = DVectXYZ;
-using DDom = DDomXYZ;
-using SDDom = SDDomXYZ;
-
-// DElemZ constexpr lbound_z = ddc::init_trivial_half_bounded_space<DDimZ>();
-// DElem constexpr lbound_all(lbound_x, lbound_y, lbound_z);
-DElem constexpr lbound_all(0, 0, 0);
+DElemXYZ constexpr lbound_all(0, 0, 0);
 
 #else // DIMENSIONALITY > 2
 
-using DElem = DElemXY;
-using DVect = DVectXY;
-using DDom = DDomXY;
-using SDDom = SDDomXY;
-
-// DElem constexpr lbound_all(lbound_x, lbound_y);
-DElem constexpr lbound_all(0, 0);
+DElemXY constexpr lbound_all(0, 0);
 
 #endif // DIMENSIONALITY > 2
 
@@ -228,6 +215,11 @@ void transform_in(
     std::vector<std::pair<int, std::array<double, 3>>> const
         &lifting_offsets_and_coefficients,
     ExecSpace instance = ExecSpace()) {
+  using DElem = ddc::DiscreteElement<DDims...>;
+  using SDDom = ddc::StridedDiscreteDomain<DDims...>;
+  static_assert(
+      std::is_same_v<typename DDomainType::discrete_element_type, DElem>,
+      "Mismatch between DDomainType and DDims...");
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
   auto const ddc_max_level_1d_vec =
@@ -277,8 +269,7 @@ void transform_in(
                       write_to_domain.back()))) ||
                 ((offset == 0) &&
                  (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) >
-                  ddc::DiscreteElement<DDimInWhichToHierarchize>(
-                      lbound)))) {
+                  ddc::DiscreteElement<DDimInWhichToHierarchize>(lbound)))) {
               strided_grid(ixyz) =
                   filter[0] *
                       strided_grid(
@@ -462,6 +453,7 @@ DiscreteDomainType decompose_domain_on_communicator(
     std::array<int, DiscreteDomainType::rank()> const &par_vector) {
   static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,
                 "DiscreteDomainType must be a DDC discrete domain type");
+  using DVect = typename DiscreteDomainType::discrete_vector_type;
 #ifndef NDEBUG
   constexpr size_t dimensionality = DiscreteDomainType::rank();
   assert(dimensionality == par_vector.size());
@@ -507,6 +499,10 @@ template <size_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
+  using DVect = DVectXY;
+  using DDom = DDomXY;
+  using SDDom = SDDomXY;
+  using DElem = SDDom::discrete_element_type;
   std::array<long int, dimensionality> maximum_level;
   if constexpr (dimensionality == 3) {
     maximum_level = {5, 6, 7};
