@@ -17,6 +17,14 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
 
+template <typename... DDims>
+auto array_to_ddc_vector(std::array<long int, sizeof...(DDims)> const &arr) {
+  // TODO temporary solution until assignment from std::array is implemented
+  ddc::DiscreteVector<DDims...> ddc_vec;
+  ddc::detail::array(ddc_vec) = arr;
+  return ddc_vec;
+}
+
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
 #define DIMENSIONALITY 2
@@ -72,18 +80,16 @@ ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
   std::array<long int, dimensionality> resolution;
   std::ranges::transform(level, resolution.begin(),
                          [](long int l) { return (1 << l); });
-  ddc::DiscreteVector<DDims...> resolution_all;
-  ddc::detail::array(resolution_all) =
-      resolution; // TODO temporary solution until assignment from std::array is
-                  // implemented
+  ddc::DiscreteVector<DDims...> resolution_all =
+      array_to_ddc_vector<DDims...>(resolution);
   std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << l); });
-  ddc::DiscreteVector<DDims...> strides_all;
-  ddc::detail::array(strides_all) = stride; // TODO
+  ddc::DiscreteVector<DDims...> strides_all =
+      array_to_ddc_vector<DDims...>(stride);
   return ddc::StridedDiscreteDomain<DDims...>(lbound, resolution_all,
                                               strides_all);
 }
@@ -112,20 +118,16 @@ ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
       half_stride[i] = 0; // no offset
     }
   }
-  ddc::DiscreteVector<DDims...> resolution_all;
-  ddc::detail::array(resolution_all) =
-      resolution; // TODO temporary solution until assignment from std::array is
-                  // implemented
-  ddc::DiscreteVector<DDims...> half_stride_vect;
-  ddc::detail::array(half_stride_vect) = half_stride; // TODO
+  ddc::DiscreteVector<DDims...> resolution_all =
+      array_to_ddc_vector<DDims...>(resolution);
+  ddc::DiscreteVector<DDims...> half_stride_vect =
+      array_to_ddc_vector<DDims...>(half_stride);
   ddc::DiscreteElement<DDims...> start_all = lbound + half_stride_vect;
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << (l + 1)); });
-  ddc::DiscreteVector<DDims...> strides_all;
-  ddc::detail::array(strides_all) = stride; // TODO
-  std::cout << " subs " << start_all << " " << resolution_all << " "
-            << strides_all << std::endl;
+  ddc::DiscreteVector<DDims...> strides_all =
+      array_to_ddc_vector<DDims...>(stride);
   return ddc::StridedDiscreteDomain<DDims...>(start_all, resolution_all,
                                               strides_all);
 }
@@ -177,11 +179,17 @@ static const std::map<std::string,
 template <typename InWhichDim, size_t dimensionality>
 ddc::DiscreteVector<InWhichDim>
 get_dimension_component(std::array<long int, dimensionality> const &level) {
-  DVect ddc_level;
-  ddc::detail::array(ddc_level) = level; // TODO temporary solution until
-                                         // assignment from std::array is
-                                         // implemented
-  return ddc::DiscreteVector<InWhichDim>(ddc_level);
+  if constexpr (dimensionality == 2) {
+    ddc::DiscreteVector<DDimX, DDimY> ddc_level =
+        array_to_ddc_vector<DDimX, DDimY>(level);
+    return ddc::DiscreteVector<InWhichDim>(ddc_level);
+  } else if constexpr (dimensionality == 3) {
+    ddc::DiscreteVector<DDimX, DDimY, DDimZ> ddc_level =
+        array_to_ddc_vector<DDimX, DDimY, DDimZ>(level);
+    return ddc::DiscreteVector<InWhichDim>(ddc_level);
+  } else {
+    static_assert("Not implemented for this dimensionality");
+  }
 }
 
 template <typename DDimInWhichToTransform,
@@ -215,10 +223,8 @@ bool transform_in(
            strided_domain.strides().template get<DDimInWhichToTransform>());
   }
 
-  ddc::DiscreteVector<DDims...> current_level;
-  ddc::detail::array(current_level) = level; // TODO temporary solution until
-                                             // assignment from std::array is
-                                             // implemented
+  ddc::DiscreteVector<DDims...> current_level =
+      array_to_ddc_vector<DDims...>(level);
 
   for (long int current_1d_level : one_d_level_range) {
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
@@ -523,10 +529,10 @@ template <size_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
-  using DVect = DVectXY;
   using DDom = DDomXY;
   using SDDom = SDDomXY;
   using DElem = SDDom::discrete_element_type;
+  using DVect = SDDom::discrete_vector_type;
   std::array<long int, dimensionality> maximum_level;
   if constexpr (dimensionality == 3) {
     maximum_level = {5, 6, 7};
@@ -538,10 +544,8 @@ void run_combination_technique(
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
                  [](int ml) { return (1 << ml) + 1; });
-  DVect resolution_all;
-  ddc::detail::array(resolution_all) =
-      resolution; // TODO temporary solution until assignment from std::array is
-                  // implemented
+  DVect resolution_all = array_to_ddc_vector<DDimX, DDimY>(resolution);
+
   // discrete domain in 3d, for the full grid but not allocated yet
   auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(
       DDimX::init<DDimX>(ddc::Coordinate<X>(0.0), ddc::Coordinate<X>(1.0),
@@ -554,6 +558,7 @@ void run_combination_technique(
   ddc::DiscreteDomain<DDimY> const y_domain =
       y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
   DDom dom_all;
+  DElem lbound_all;
   if constexpr (dimensionality == 3) {
     auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(
         DDimZ::init<DDimZ>(ddc::Coordinate<Z>(0.0), ddc::Coordinate<Z>(1.0),
@@ -562,14 +567,11 @@ void run_combination_technique(
         z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
 
     dom_all = DDom(x_domain, y_domain, z_domain);
+    lbound_all = DElem(0, 0, 0);
   } else if constexpr (dimensionality == 2) {
     dom_all = DDom(x_domain, y_domain);
+    lbound_all = DElem(0, 0);
   }
-#if DIMENSIONALITY > 2
-  DElemXYZ lbound_all(0, 0, 0);
-#else  // DIMENSIONALITY > 2
-  DElemXY lbound_all(0, 0);
-#endif // DIMENSIONALITY > 2
 
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   DDom const local_domain =
