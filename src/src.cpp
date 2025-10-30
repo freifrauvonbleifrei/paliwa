@@ -92,14 +92,16 @@ double const y_end = 1.;
 double const z_start = 0.;
 double const z_end = 1.;
 
-template <size_t dimensionality>
-SDDom strided_domain_from_level(
-    std::array<long int, dimensionality> const &level,
-    std::array<long int, dimensionality> const &finest_level) {
+template <typename... DDims>
+ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
+    std::array<long int, sizeof...(DDims)> const &level,
+    std::array<long int, sizeof...(DDims)> const &finest_level,
+    ddc::DiscreteElement<DDims...> lbound) {
+  constexpr size_t dimensionality = sizeof...(DDims);
   std::array<long int, dimensionality> resolution;
   std::ranges::transform(level, resolution.begin(),
                          [](long int l) { return (1 << l); });
-  DVect resolution_all;
+  ddc::DiscreteVector<DDims...> resolution_all;
   ddc::detail::array(resolution_all) =
       resolution; // TODO temporary solution until assignment from std::array is
                   // implemented
@@ -109,9 +111,10 @@ SDDom strided_domain_from_level(
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << l); });
-  DVect strides_all;
+  ddc::DiscreteVector<DDims...> strides_all;
   ddc::detail::array(strides_all) = stride; // TODO
-  return SDDom(lbound_all, resolution_all, strides_all);
+  return ddc::StridedDiscreteDomain<DDims...>(lbound, resolution_all,
+                                              strides_all);
 }
 
 template <size_t dimensionality>
@@ -206,14 +209,14 @@ template <typename DDimInWhichToHierarchize,
           typename ChunkSpanType, // TODO w.r.t. DDomainType
           typename LevelRange,    // TODO input_range concept
           typename ExecSpace = Kokkos::DefaultExecutionSpace>
-void transform_in(DDomainType const &strided_domain,
-                  ChunkSpanType const strided_grid,
-                  std::array<long int, DDomainType::rank()> const &level,
-                  std::array<long int, DDomainType::rank()> const &maximum_level,
-                  LevelRange const &one_d_level_range,
-                  std::vector<std::pair<int, std::array<double, 3>>> const
-                      &lifting_offsets_and_coefficients,
-                  ExecSpace instance = ExecSpace()) {
+void transform_in(
+    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
+    std::array<long int, DDomainType::rank()> const &level,
+    std::array<long int, DDomainType::rank()> const &maximum_level,
+    LevelRange const &one_d_level_range,
+    std::vector<std::pair<int, std::array<double, 3>>> const
+        &lifting_offsets_and_coefficients,
+    ExecSpace instance = ExecSpace()) {
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize>(level);
   auto const ddc_max_level_1d_vec =
@@ -234,7 +237,7 @@ void transform_in(DDomainType const &strided_domain,
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
     current_level.get<DDimInWhichToHierarchize>() = current_1d_level;
     auto const operating_domain = strided_domain_from_level(
-        ddc::detail::array(current_level), maximum_level);
+        ddc::detail::array(current_level), maximum_level, lbound_all);
 
     for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
       std::function<SDDom(SDDom const &)> coarsen_domain;
@@ -569,7 +572,7 @@ void run_combination_technique(
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
     component_grid_domains.emplace_back(
-        strided_domain_from_level(level, maximum_level));
+        strided_domain_from_level(level, maximum_level, lbound_all));
     level_data.emplace_back(ddc::Chunk(
         "strided_grid_" + std::to_string(grid_index),
         component_grid_domains.back(), ddc::DeviceAllocator<double>()));
