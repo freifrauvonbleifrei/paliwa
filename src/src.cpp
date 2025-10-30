@@ -63,22 +63,6 @@ using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
 using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
 using SDDomXYZ = ddc::StridedDiscreteDomain<DDimX, DDimY, DDimZ>;
 
-#if DIMENSIONALITY > 2
-DElemXYZ constexpr lbound_all(0, 0, 0);
-
-#else // DIMENSIONALITY > 2
-
-DElemXY constexpr lbound_all(0, 0);
-
-#endif // DIMENSIONALITY > 2
-
-double const x_start = 0.;
-double const x_end = 1.;
-double const y_start = 0.;
-double const y_end = 1.;
-double const z_start = 0.;
-double const z_end = 1.;
-
 template <typename... DDims>
 ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
@@ -331,12 +315,14 @@ void transform_in(
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
-          typename ExecSpace = Kokkos::DefaultExecutionSpace>
+          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename... DDims>
 void hierarchize_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &minimum_level,
     std::array<long int, DDomainType::rank()> const &maximum_level,
+    ddc::DiscreteElement<DDims...> const &lbound,
     std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
@@ -349,7 +335,7 @@ void hierarchize_in(
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
-      strided_domain, strided_grid, level, maximum_level, lbound_all,
+      strided_domain, strided_grid, level, maximum_level, lbound,
       decreasing_range,
       lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
       instance);
@@ -357,12 +343,14 @@ void hierarchize_in(
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
-          typename ExecSpace = Kokkos::DefaultExecutionSpace>
+          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename... DDims>
 void dehierarchize_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &minimum_level,
     std::array<long int, DDomainType::rank()> const &maximum_level,
+    ddc::DiscreteElement<DDims...> const &lbound,
     std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
@@ -374,7 +362,7 @@ void dehierarchize_in(
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
-      strided_domain, strided_grid, level, maximum_level, lbound_all,
+      strided_domain, strided_grid, level, maximum_level, lbound,
       increasing_range,
       lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
       instance);
@@ -520,21 +508,20 @@ void run_combination_technique(
                   // implemented
   // discrete domain in 3d, for the full grid but not allocated yet
   auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(
-      DDimX::init<DDimX>(ddc::Coordinate<X>(x_start), ddc::Coordinate<X>(x_end),
+      DDimX::init<DDimX>(ddc::Coordinate<X>(0.0), ddc::Coordinate<X>(1.0),
                          ddc::DiscreteVector<DDimX>(resolution[0])));
   ddc::DiscreteDomain<DDimX> const x_domain =
       x_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimX>(1));
   auto const y_domain_with_periodic_point = ddc::init_discrete_space<DDimY>(
-      DDimY::init<DDimY>(ddc::Coordinate<Y>(y_start), ddc::Coordinate<Y>(y_end),
+      DDimY::init<DDimY>(ddc::Coordinate<Y>(0.0), ddc::Coordinate<Y>(1.0),
                          ddc::DiscreteVector<DDimY>(resolution[1])));
   ddc::DiscreteDomain<DDimY> const y_domain =
       y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
   DDom dom_all;
   if constexpr (dimensionality == 3) {
-    auto const z_domain_with_periodic_point =
-        ddc::init_discrete_space<DDimZ>(DDimZ::init<DDimZ>(
-            ddc::Coordinate<Z>(z_start), ddc::Coordinate<Z>(z_end),
-            ddc::DiscreteVector<DDimZ>(resolution[2])));
+    auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(
+        DDimZ::init<DDimZ>(ddc::Coordinate<Z>(0.0), ddc::Coordinate<Z>(1.0),
+                           ddc::DiscreteVector<DDimZ>(resolution[2])));
     ddc::DiscreteDomain<DDimZ> const z_domain =
         z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
 
@@ -542,6 +529,12 @@ void run_combination_technique(
   } else if constexpr (dimensionality == 2) {
     dom_all = DDom(x_domain, y_domain);
   }
+#if DIMENSIONALITY > 2
+  DElemXYZ lbound_all(0, 0, 0);
+#else  // DIMENSIONALITY > 2
+  DElemXY lbound_all(0, 0);
+#endif // DIMENSIONALITY > 2
+
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   DDom const local_domain =
       decompose_domain_on_communicator(dom_all, comm, parallelization_vector);
@@ -620,14 +613,14 @@ void run_combination_technique(
     auto strided_grid = level_data[grid_index].span_view();
 
     hierarchize_in<DDimX>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, wavelet_name,
+                          maximum_level, lbound_all, wavelet_name,
                           instances[grid_index % instances.size()]);
     hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, wavelet_name,
+                          maximum_level, lbound_all, wavelet_name,
                           instances[grid_index % instances.size()]);
     if constexpr (dimensionality > 2) {
       hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
-                            maximum_level, wavelet_name,
+                            maximum_level, lbound_all, wavelet_name,
                             instances[grid_index % instances.size()]);
     }
   }
@@ -769,9 +762,12 @@ void run_combination_technique(
 
   //   de-hierarchize on the combined full grid
   dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level, wavelet_name);
+                                minimum_level, maximum_level, lbound_all,
+                                wavelet_name, instances[0]);
   dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level, wavelet_name);
+                                minimum_level, maximum_level, lbound_all,
+                                wavelet_name, instances[0]);
+  fence_all_instances(instances);
 
   std::string max_level_str = "";
   for (auto l : maximum_level) {
