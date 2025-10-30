@@ -34,7 +34,9 @@ if __name__ == "__main__":
             (level[0] - minimum_level[0], level[1] - minimum_level[1]),
             fig=fig,
         )
-        ax.imshow(data, aspect="auto", origin="lower")
+        ax.imshow(data, aspect="auto", origin="lower",
+            vmin=-1.0,
+            vmax=1.0,)
         ax.set_title(f"Level: {level}")
     # print maximum level
     full_grid_filename =  filename_from_level(maximum_level)
@@ -49,6 +51,9 @@ if __name__ == "__main__":
         (nrows -1, ncols -1),
         fig=fig,
     )
-    ax.imshow(full_grid_data, aspect="auto", origin="lower")
+    ax.imshow(full_grid_data, aspect="auto", origin="lower",
+        vmin=-1.0,
+        vmax=1.0,)
     ax.set_title(f"Combined: {maximum_level}")
-    plt.show()
+    # plt.show()
+    plt.savefig("combination_scheme.png")
