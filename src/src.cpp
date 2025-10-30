@@ -117,10 +117,12 @@ ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
                                               strides_all);
 }
 
-template <size_t dimensionality>
-SDDom strided_hierarchical_domain_from_level(
-    std::array<long int, dimensionality> const &level,
-    std::array<long int, dimensionality> const &finest_level) {
+template <typename... DDims>
+ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
+    std::array<long int, sizeof...(DDims)> const &level,
+    std::array<long int, sizeof...(DDims)> const &finest_level,
+    ddc::DiscreteElement<DDims...> lbound) {
+  constexpr size_t dimensionality = sizeof...(DDims);
   std::array<long int, dimensionality> resolution;
   std::ranges::transform(level, resolution.begin(),
                          [](long int ml) { return (1 << (ml - 1)); });
@@ -139,21 +141,22 @@ SDDom strided_hierarchical_domain_from_level(
       half_stride[i] = 0; // no offset
     }
   }
-  DVect resolution_all;
+  ddc::DiscreteVector<DDims...> resolution_all;
   ddc::detail::array(resolution_all) =
       resolution; // TODO temporary solution until assignment from std::array is
                   // implemented
-  DVect half_stride_vect;
+  ddc::DiscreteVector<DDims...> half_stride_vect;
   ddc::detail::array(half_stride_vect) = half_stride; // TODO
-  DElem start_all = lbound_all + half_stride_vect;
+  ddc::DiscreteElement<DDims...> start_all = lbound + half_stride_vect;
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << (l + 1)); });
-  DVect strides_all;
+  ddc::DiscreteVector<DDims...> strides_all;
   ddc::detail::array(strides_all) = stride; // TODO
   std::cout << " subs " << start_all << " " << resolution_all << " "
             << strides_all << std::endl;
-  return SDDom(start_all, resolution_all, strides_all);
+  return ddc::StridedDiscreteDomain<DDims...>(start_all, resolution_all,
+                                              strides_all);
 }
 
 template <typename DDimInWhichItsOdd>
@@ -674,8 +677,8 @@ void run_combination_technique(
     auto const &subspace_level = subspace_level_and_count.first;
     auto const &count = subspace_level_and_count.second;
     if (count > 1) {
-      auto subspace_domain =
-          strided_hierarchical_domain_from_level(subspace_level, maximum_level);
+      auto subspace_domain = strided_hierarchical_domain_from_level(
+          subspace_level, maximum_level, lbound_all);
       accumulated_size += subspace_domain.size();
       subspaces_levels_host.insert(used_subspace_number, subspace_level);
       subspaces_domains_and_data_pointers_host.insert(
