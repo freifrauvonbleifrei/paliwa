@@ -190,7 +190,7 @@ template <typename DDimInWhichToTransform,
           typename LevelRange,    // TODO input_range concept
           typename ExecSpace,     // todo = Kokkos::DefaultExecutionSpace,
           typename... DDims>
-void transform_in(
+bool transform_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &maximum_level,
@@ -309,13 +309,14 @@ void transform_in(
           });
     }
   }
+  return true;
 }
 
 template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-void hierarchize_in(
+bool hierarchize_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &minimum_level,
@@ -343,7 +344,7 @@ template <typename DDimInWhichToHierarchize, typename DDomainType,
           typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-void dehierarchize_in(
+bool dehierarchize_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &minimum_level,
@@ -364,6 +365,43 @@ void dehierarchize_in(
       increasing_range,
       lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
       instance);
+}
+
+template <typename DDomainType, typename ChunkSpanType,
+          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename... DDims>
+void hierarchize(DDomainType const &strided_domain,
+                 ChunkSpanType const strided_grid,
+                 std::array<long int, DDomainType::rank()> const &level,
+                 std::array<long int, DDomainType::rank()> const &minimum_level,
+                 std::array<long int, DDomainType::rank()> const &maximum_level,
+                 ddc::DiscreteElement<DDims...> const &lbound,
+                 std::string const &wavelet_name = "hat",
+                 ExecSpace instance = ExecSpace()) {
+
+  // fold expression to call for every dimension
+  bool unused =
+      (hierarchize_in<DDims>(strided_domain, strided_grid, level, minimum_level,
+                             maximum_level, lbound, wavelet_name, instance) &&
+       ...);
+}
+
+template <typename DDomainType, typename ChunkSpanType,
+          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename... DDims>
+void dehierarchize(
+    DDomainType const &strided_domain, ChunkSpanType const strided_grid,
+    std::array<long int, DDomainType::rank()> const &level,
+    std::array<long int, DDomainType::rank()> const &minimum_level,
+    std::array<long int, DDomainType::rank()> const &maximum_level,
+    ddc::DiscreteElement<DDims...> const &lbound,
+    std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
+
+  // fold expression to call for every dimension
+  bool unused = (dehierarchize_in<DDims>(strided_domain, strided_grid, level,
+                                         minimum_level, maximum_level, lbound,
+                                         wavelet_name, instance) &&
+                 ...);
 }
 
 template <typename T> // with T for example std::array<long int, dimensionality>
@@ -610,17 +648,9 @@ void run_combination_technique(
     SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    hierarchize_in<DDimX>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, lbound_all, wavelet_name,
-                          instances[grid_index % instances.size()]);
-    hierarchize_in<DDimY>(strided_domain, strided_grid, level, minimum_level,
-                          maximum_level, lbound_all, wavelet_name,
-                          instances[grid_index % instances.size()]);
-    if constexpr (dimensionality > 2) {
-      hierarchize_in<DDimZ>(strided_domain, strided_grid, level, minimum_level,
-                            maximum_level, lbound_all, wavelet_name,
-                            instances[grid_index % instances.size()]);
-    }
+    hierarchize(strided_domain, strided_grid, level, minimum_level,
+                maximum_level, lbound_all, wavelet_name,
+                instances[grid_index % instances.size()]);
   }
   fence_all_instances(instances);
 
@@ -759,12 +789,8 @@ void run_combination_technique(
   fence_all_instances(instances);
 
   //   de-hierarchize on the combined full grid
-  dehierarchize_in<DDimX, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level, lbound_all,
-                                wavelet_name, instances[0]);
-  dehierarchize_in<DDimY, DDom>(dom_all, full_grid_view, maximum_level,
-                                minimum_level, maximum_level, lbound_all,
-                                wavelet_name, instances[0]);
+  dehierarchize(dom_all, full_grid_view, maximum_level, minimum_level,
+                maximum_level, lbound_all, wavelet_name, instances[0]);
   fence_all_instances(instances);
 
   std::string max_level_str = "";
