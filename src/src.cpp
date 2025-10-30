@@ -406,28 +406,11 @@ void dump_chunk_span_to_binary_file(ChunkType const span,
   }
 }
 
-template <class HeadTag>
-static ddc::DiscreteDomain<HeadTag>
-distribute_idx_range(ddc::DiscreteDomain<HeadTag> global_idx_range,
-                     DVect const &par_vector, DVect const &my_coords) {
-  if (global_idx_range.size() % par_vector.get<HeadTag>() != 0) {
-    throw std::runtime_error(
-        "The provided index range cannot be split equally over "
-        "the specified number of MPI ranks.");
-  }
-  ddc::DiscreteVector<HeadTag> elems_on_dim(global_idx_range.size() /
-                                            par_vector.get<HeadTag>());
-  ddc::DiscreteDomain<HeadTag> last_dim_local_idx_range(
-      global_idx_range.front() + my_coords.get<HeadTag>() * elems_on_dim,
-      elems_on_dim);
-  return last_dim_local_idx_range;
-}
-
-template <class HeadTag, class... Tags,
-          std::enable_if_t<(sizeof...(Tags) > 0), bool> = true>
+template <class HeadTag, class... Tags>
 static ddc::DiscreteDomain<HeadTag, Tags...>
 distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
-                     DVect const &par_vector, DVect const &my_coords) {
+                     ddc::DiscreteVector<HeadTag, Tags...> const &par_vector,
+                     ddc::DiscreteVector<HeadTag, Tags...> const &my_coords) {
   ddc::DiscreteDomain<HeadTag> global_idx_range_along_dim =
       ddc::select<HeadTag>(global_idx_range);
   ddc::DiscreteDomain<HeadTag> local_idx_range_along_dim;
@@ -449,11 +432,14 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
       global_idx_range_along_dim.front() + rank_along_dim * elems_on_dim);
   local_idx_range_along_dim =
       ddc::DiscreteDomain<HeadTag>(distrib_start, elems_on_dim);
-  // Calculate the index range for the subsequent dimensions
-  ddc::DiscreteDomain<Tags...> remaining_dims =
-      ddc::select<Tags...>(global_idx_range);
-  remaining_idx_range =
-      distribute_idx_range(remaining_dims, par_vector, my_coords);
+  if constexpr (sizeof...(Tags) > 0) {
+    // Calculate the index range for the subsequent dimensions
+    ddc::DiscreteDomain<Tags...> remaining_dims =
+        ddc::select<Tags...>(global_idx_range);
+    remaining_idx_range =
+        distribute_idx_range(remaining_dims, ddc::select<Tags...>(par_vector),
+                             ddc::select<Tags...>(my_coords));
+  }
   return ddc::DiscreteDomain<HeadTag, Tags...>(local_idx_range_along_dim,
                                                remaining_idx_range);
 }
