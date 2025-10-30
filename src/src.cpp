@@ -159,26 +159,32 @@ ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
                                               strides_all);
 }
 
-template <typename DDimInWhichItsOdd>
-SDDom odd_strided_domain_from_domain(SDDom const &domain) {
+template <typename DDimInWhichItsOdd, typename... DDims>
+ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
+    ddc::StridedDiscreteDomain<DDims...> const &domain,
+    ddc::DiscreteElement<DDims...> lbound) {
   ddc::DiscreteVector<DDimInWhichItsOdd> odd_offset(
-      domain.strides().get<DDimInWhichItsOdd>());
-  DVect strides_odd = domain.strides();
-  strides_odd.get<DDimInWhichItsOdd>() *= 2;
+      domain.strides().template get<DDimInWhichItsOdd>());
+  ddc::DiscreteVector<DDims...> strides_odd = domain.strides();
+  strides_odd.template get<DDimInWhichItsOdd>() *= 2;
   auto extent_odd = domain.extents();
-  extent_odd.get<DDimInWhichItsOdd>() =
-      (extent_odd.get<DDimInWhichItsOdd>()) / 2;
-  return SDDom(lbound_all + odd_offset, extent_odd, strides_odd);
+  extent_odd.template get<DDimInWhichItsOdd>() =
+      (extent_odd.template get<DDimInWhichItsOdd>()) / 2;
+  return ddc::StridedDiscreteDomain<DDims...>(lbound + odd_offset, extent_odd,
+                                              strides_odd);
 }
 
-template <typename DDimInWhichItsEven>
-SDDom even_strided_domain_from_domain(SDDom const &domain) {
-  DVect strides_even = domain.strides();
-  strides_even.get<DDimInWhichItsEven>() *= 2;
+template <typename DDimInWhichItsEven, typename... DDims>
+ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
+    ddc::StridedDiscreteDomain<DDims...> const &domain,
+    ddc::DiscreteElement<DDims...> lbound) {
+  ddc::DiscreteVector<DDims...> strides_even = domain.strides();
+  strides_even.template get<DDimInWhichItsEven>() *= 2;
   auto extent_even = domain.extents();
-  extent_even.get<DDimInWhichItsEven>() =
-      (extent_even.get<DDimInWhichItsEven>()) / 2;
-  return SDDom(lbound_all, extent_even, strides_even);
+  extent_even.template get<DDimInWhichItsEven>() =
+      (extent_even.template get<DDimInWhichItsEven>()) / 2;
+  return ddc::StridedDiscreteDomain<DDims...>(lbound, extent_even,
+                                              strides_even);
 }
 
 // TODO consider making this constexpr frozen::map ?
@@ -211,11 +217,13 @@ template <typename DDimInWhichToHierarchize,
           typename DDomainType,   // TODO either DDom or SDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
           typename LevelRange,    // TODO input_range concept
-          typename ExecSpace = Kokkos::DefaultExecutionSpace>
+          typename ExecSpace,     // todo = Kokkos::DefaultExecutionSpace,
+          typename... DDims>
 void transform_in(
     DDomainType const &strided_domain, ChunkSpanType const strided_grid,
     std::array<long int, DDomainType::rank()> const &level,
     std::array<long int, DDomainType::rank()> const &maximum_level,
+    ddc::DiscreteElement<DDims...> const &lbound,
     LevelRange const &one_d_level_range,
     std::vector<std::pair<int, std::array<double, 3>>> const
         &lifting_offsets_and_coefficients,
@@ -231,25 +239,27 @@ void transform_in(
            strided_domain.strides().template get<DDimInWhichToHierarchize>());
   }
 
-  DVect current_level;
+  ddc::DiscreteVector<DDims...> current_level;
   ddc::detail::array(current_level) = level; // TODO temporary solution until
                                              // assignment from std::array is
                                              // implemented
 
   for (long int current_1d_level : one_d_level_range) {
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
-    current_level.get<DDimInWhichToHierarchize>() = current_1d_level;
+    current_level.template get<DDimInWhichToHierarchize>() = current_1d_level;
     auto const operating_domain = strided_domain_from_level(
-        ddc::detail::array(current_level), maximum_level, lbound_all);
+        ddc::detail::array(current_level), maximum_level, lbound);
 
     for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
       std::function<SDDom(SDDom const &)> coarsen_domain;
       if (offset == 0) {
-        coarsen_domain =
-            even_strided_domain_from_domain<DDimInWhichToHierarchize>;
+        coarsen_domain = std::bind(
+            even_strided_domain_from_domain<DDimInWhichToHierarchize, DDims...>,
+            std::placeholders::_1, lbound);
       } else if (offset == 1) {
-        coarsen_domain =
-            odd_strided_domain_from_domain<DDimInWhichToHierarchize>;
+        coarsen_domain = std::bind(
+            odd_strided_domain_from_domain<DDimInWhichToHierarchize, DDims...>,
+            std::placeholders::_1, lbound);
       } else {
         throw std::runtime_error("Filter offset not supported");
       }
@@ -268,7 +278,7 @@ void transform_in(
                 ((offset == 0) &&
                  (ddc::DiscreteElement<DDimInWhichToHierarchize>(ixyz) >
                   ddc::DiscreteElement<DDimInWhichToHierarchize>(
-                      lbound_all)))) {
+                      lbound)))) {
               strided_grid(ixyz) =
                   filter[0] *
                       strided_grid(
@@ -285,10 +295,10 @@ void transform_in(
                 // TODO make separate step to avoid branch here
                 DElem wraparound;
                 if constexpr (std::is_same_v<DDimInWhichToHierarchize, DDimX>) {
-                  wraparound = DElem(DElemX(lbound_all), DElemY(ixyz));
+                  wraparound = DElem(DElemX(lbound), DElemY(ixyz));
                 } else if constexpr (std::is_same_v<DDimInWhichToHierarchize,
                                                     DDimY>) {
-                  wraparound = DElem(DElemX(ixyz), DElemY(lbound_all));
+                  wraparound = DElem(DElemX(ixyz), DElemY(lbound));
                 } else {
                   static_assert("Not implemented for this dimension");
                 }
@@ -348,7 +358,8 @@ void hierarchize_in(
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
-      strided_domain, strided_grid, level, maximum_level, decreasing_range,
+      strided_domain, strided_grid, level, maximum_level, lbound_all,
+      decreasing_range,
       lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
       instance);
 }
@@ -372,7 +383,8 @@ void dehierarchize_in(
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
-      strided_domain, strided_grid, level, maximum_level, increasing_range,
+      strided_domain, strided_grid, level, maximum_level, lbound_all,
+      increasing_range,
       lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
       instance);
 }
