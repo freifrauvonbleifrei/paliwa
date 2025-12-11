@@ -542,6 +542,47 @@ std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
   return component_grid_domains;
 }
 
+template <typename... DDims>
+std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
+                       ddc::DeviceAllocator<double>>>
+initialize_combination_scheme(
+    std::vector<ddc::StridedDiscreteDomain<DDims...>> const
+        &component_grid_domains,
+    std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
+    std::vector<Kokkos::DefaultExecutionSpace> const &instances) {
+  using DElem = ddc::DiscreteElement<DDims...>;
+
+  std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
+                         ddc::DeviceAllocator<double>>>
+      level_data;
+
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    level_data.emplace_back(ddc::Chunk(
+        "strided_grid_" + std::to_string(grid_index),
+        component_grid_domains[grid_index], ddc::DeviceAllocator<double>()));
+    auto strided_grid = level_data.back().span_view();
+
+    // initialize!
+    ddc::parallel_for_each(
+        instances[grid_index % instances.size()],
+        component_grid_domains[grid_index], KOKKOS_LAMBDA(DElem const ixyz) {
+          constexpr size_t dimensionality = sizeof...(DDims);
+          double const x =
+              ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
+          double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
+          double result;
+          if constexpr (dimensionality == 3) {
+            double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
+            result = std::cos(3.0 + (x + y + z));
+          } else if constexpr (dimensionality == 2) {
+            result = std::cos(3.0 + (x + y));
+          }
+          strided_grid(ixyz) = result;
+        });
+  }
+  return level_data;
+}
+
 template <size_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
@@ -613,32 +654,8 @@ void run_combination_technique(
   auto component_grid_domains =
       get_strided_domains(all_levels, maximum_level, lbound_all);
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
-      level_data;
-
-  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
-    auto &level = all_levels[grid_index];
-    level_data.emplace_back(ddc::Chunk(
-        "strided_grid_" + std::to_string(grid_index),
-        component_grid_domains[grid_index], ddc::DeviceAllocator<double>()));
-    auto strided_grid = level_data.back().span_view();
-
-    // initialize!
-    ddc::parallel_for_each(
-        instances[grid_index % instances.size()],
-        component_grid_domains[grid_index], KOKKOS_LAMBDA(DElem const ixyz) {
-          double const x =
-              ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
-          double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
-          double result;
-          if constexpr (dimensionality == 3) {
-            double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
-            result = std::cos(3.0 + (x + y + z));
-          } else if constexpr (dimensionality == 2) {
-            result = std::cos(3.0 + (x + y));
-          }
-          strided_grid(ixyz) = result;
-        });
-  }
+      level_data = initialize_combination_scheme(component_grid_domains,
+                                                 all_levels, instances);
   fence_all_instances(instances);
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
