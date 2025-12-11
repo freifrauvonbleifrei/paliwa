@@ -61,16 +61,6 @@ using DElemY = ddc::DiscreteElement<DDimY>;
 struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 
-using DElemXY = ddc::DiscreteElement<DDimX, DDimY>;
-using DVectXY = ddc::DiscreteVector<DDimX, DDimY>;
-using DDomXY = ddc::DiscreteDomain<DDimX, DDimY>;
-using SDDomXY = ddc::StridedDiscreteDomain<DDimX, DDimY>;
-
-using DElemXYZ = ddc::DiscreteElement<DDimX, DDimY, DDimZ>;
-using DVectXYZ = ddc::DiscreteVector<DDimX, DDimY, DDimZ>;
-using DDomXYZ = ddc::DiscreteDomain<DDimX, DDimY, DDimZ>;
-using SDDomXYZ = ddc::StridedDiscreteDomain<DDimX, DDimY, DDimZ>;
-
 template <typename... DDims>
 ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
@@ -583,12 +573,13 @@ initialize_combination_scheme(
   return level_data;
 }
 
-template <size_t dimensionality>
+template <typename... DDims>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     MPI_Comm comm) {
-  using DDom = DDomXY;
-  using SDDom = SDDomXY;
+  constexpr size_t dimensionality = sizeof...(DDims);
+  using DDom = ddc::DiscreteDomain<DDims...>;
+  using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   using DElem = SDDom::discrete_element_type;
   using DVect = SDDom::discrete_vector_type;
   std::array<long int, dimensionality> maximum_level;
@@ -602,7 +593,7 @@ void run_combination_technique(
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
                  [](int ml) { return (1 << ml) + 1; });
-  DVect resolution_all = array_to_ddc_vector<DDimX, DDimY>(resolution);
+  DVect resolution_all = array_to_ddc_vector<DDims...>(resolution);
 
   // discrete domain in 3d, for the full grid but not allocated yet
   auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(
@@ -847,6 +838,20 @@ void run_combination_technique(
   }
 }
 
+template <size_t dimensionality>
+void run_combination_technique_in_dimensions(
+    std::vector<Kokkos::DefaultExecutionSpace> const &instances,
+    MPI_Comm comm) {
+  if constexpr (dimensionality == 2) {
+    run_combination_technique<DDimX, DDimY>(instances, comm);
+  } else if constexpr (dimensionality == 3) {
+    run_combination_technique<DDimX, DDimY, DDimZ>(instances,
+                                                                   comm);
+  } else {
+    throw std::runtime_error("Dimensionality not yet supported");
+  }
+}
+
 int main() {
   MPI_Init(0, nullptr);
   Kokkos::ScopeGuard const kokkos_scope;
@@ -857,7 +862,7 @@ int main() {
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
-  run_combination_technique<DIMENSIONALITY>(instances, MPI_COMM_WORLD);
+  run_combination_technique_in_dimensions<2>(instances, MPI_COMM_WORLD);
 
   MPI_Finalize();
 }
