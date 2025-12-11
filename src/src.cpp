@@ -166,24 +166,15 @@ static const std::map<std::string,
         {"fullweighting", {{1, {0.5, 1.0, 0.5}}, {0, {-0.5, 2.0, -0.5}}}},
 };
 
-template <typename InWhichDim, size_t dimensionality>
+template <typename InWhichDim, typename... DDims>
 ddc::DiscreteVector<InWhichDim>
-get_dimension_component(std::array<long int, dimensionality> const &level) {
-  if constexpr (dimensionality == 2) {
-    ddc::DiscreteVector<DDimX, DDimY> ddc_level =
-        array_to_ddc_vector<DDimX, DDimY>(level);
-    return ddc::DiscreteVector<InWhichDim>(ddc_level);
-  } else if constexpr (dimensionality == 3) {
-    ddc::DiscreteVector<DDimX, DDimY, DDimZ> ddc_level =
-        array_to_ddc_vector<DDimX, DDimY, DDimZ>(level);
-    return ddc::DiscreteVector<InWhichDim>(ddc_level);
-  } else {
-    static_assert("Not implemented for this dimensionality");
-  }
+get_dimension_component(std::array<long int, sizeof...(DDims)> const &level) {
+  ddc::DiscreteVector<DDims...> ddc_vec(level);
+  return ddc::DiscreteVector<InWhichDim>(ddc_vec.template get<InWhichDim>());
 }
 
 template <typename DDimInWhichToTransform,
-          typename DDomainType,   // TODO either DDom or SDDom
+          typename DDomainType,   // TODO either DDom or SDDom or SparseDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
           typename LevelRange,    // TODO input_range concept
           typename ExecSpace,     // todo = Kokkos::DefaultExecutionSpace,
@@ -203,9 +194,9 @@ bool transform_in(
       std::is_same_v<typename DDomainType::discrete_element_type, DElem>,
       "Mismatch between DDomainType and DDims...");
   auto const ddc_level_1d_vec =
-      get_dimension_component<DDimInWhichToTransform>(level);
+      get_dimension_component<DDimInWhichToTransform, DDims...>(level);
   auto const ddc_max_level_1d_vec =
-      get_dimension_component<DDimInWhichToTransform>(maximum_level);
+      get_dimension_component<DDimInWhichToTransform, DDims...>(maximum_level);
 
   // check the finest stride, if DDomainType is SDDom
   if constexpr (std::is_same_v<DDomainType, SDDom>) {
@@ -292,9 +283,9 @@ bool hierarchize_in(
     std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(level);
   auto const ddc_min_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(minimum_level);
 
   auto decreasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
@@ -320,9 +311,9 @@ bool dehierarchize_in(
     std::string const &wavelet_name = "hat", ExecSpace instance = ExecSpace()) {
 
   auto const ddc_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(level);
   auto const ddc_min_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize>(minimum_level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(minimum_level);
 
   auto increasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
