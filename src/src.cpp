@@ -240,16 +240,51 @@ bool transform_in(
       ddc::parallel_for_each(
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // how to access / slice at every other point in x?
-            // check for out of bounds
-            if (((offset == 1) &&
-                 (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
-                      ddc::DiscreteVector<DDimInWhichToTransform>(
-                          current_stride) <=
-                  ddc::DiscreteElement<DDimInWhichToTransform>(
-                      write_to_domain.back()))) ||
-                ((offset == 0) &&
-                 (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) >
-                  ddc::DiscreteElement<DDimInWhichToTransform>(lbound)))) {
+            // check for out of bounds, periodic if necessary
+            if ((offset == 1) &&
+                (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
+                     ddc::DiscreteVector<DDimInWhichToTransform>(
+                         current_stride) >
+                 ddc::DiscreteElement<DDimInWhichToTransform>(
+                     write_to_domain.back()))) {
+              // on the upper boundary, no +1 available
+              // TODO make separate step to avoid branch here
+              DElem wraparound;
+              if (std::is_same_v<DDimInWhichToTransform, DDimX>) {
+                wraparound = DElem(DElemX(lbound), DElemY(ixyz));
+              } else if (std::is_same_v<DDimInWhichToTransform, DDimY>) {
+                wraparound = DElem(DElemX(ixyz), DElemY(lbound));
+              } else {
+                static_assert("Not implemented for this dimension");
+              }
+              strided_grid(ixyz) =
+                  filter[0] *
+                      strided_grid(ixyz -
+                                   ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride)) +
+                  filter[1] * strided_grid(ixyz) +
+                  filter[2] * strided_grid(wraparound);
+            } else if ((offset == 0) &&
+                       (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) <=
+                        ddc::DiscreteElement<DDimInWhichToTransform>(lbound))) {
+              // on the lower boundary, no -1 available
+              auto const domain_back = operating_domain.back();
+              DElem wraparound;
+              if (std::is_same_v<DDimInWhichToTransform, DDimX>) {
+                wraparound = DElem(DElemX(domain_back), DElemY(ixyz));
+              } else if (std::is_same_v<DDimInWhichToTransform, DDimY>) {
+                wraparound = DElem(DElemX(ixyz), DElemY(domain_back));
+              } else {
+                static_assert("Not implemented for this dimension");
+              }
+              strided_grid(ixyz) =
+                  filter[0] * strided_grid(wraparound) +
+                  filter[1] * strided_grid(ixyz) +
+                  filter[2] *
+                      strided_grid(ixyz +
+                                   ddc::DiscreteVector<DDimInWhichToTransform>(
+                                       current_stride));
+            } else {
               strided_grid(ixyz) =
                   filter[0] *
                       strided_grid(ixyz -
@@ -260,47 +295,6 @@ bool transform_in(
                       strided_grid(ixyz +
                                    ddc::DiscreteVector<DDimInWhichToTransform>(
                                        current_stride));
-            } else {
-              if (offset == 1) {
-                // on the upper boundary, no +1 available
-                // TODO make separate step to avoid branch here
-                DElem wraparound;
-                if constexpr (std::is_same_v<DDimInWhichToTransform, DDimX>) {
-                  wraparound = DElem(DElemX(lbound), DElemY(ixyz));
-                } else if constexpr (std::is_same_v<DDimInWhichToTransform,
-                                                    DDimY>) {
-                  wraparound = DElem(DElemX(ixyz), DElemY(lbound));
-                } else {
-                  static_assert("Not implemented for this dimension");
-                }
-                strided_grid(ixyz) =
-                    filter[0] *
-                        strided_grid(
-                            ixyz - ddc::DiscreteVector<DDimInWhichToTransform>(
-                                       current_stride)) +
-                    filter[1] * strided_grid(ixyz) +
-                    filter[2] * strided_grid(wraparound);
-
-              } else {
-                // on the lower boundary, no -1 available
-                auto const domain_back = operating_domain.back();
-                DElem wraparound;
-                if constexpr (std::is_same_v<DDimInWhichToTransform, DDimX>) {
-                  wraparound = DElem(DElemX(domain_back), DElemY(ixyz));
-                } else if constexpr (std::is_same_v<DDimInWhichToTransform,
-                                                    DDimY>) {
-                  wraparound = DElem(DElemX(ixyz), DElemY(domain_back));
-                } else {
-                  static_assert("Not implemented for this dimension");
-                }
-                strided_grid(ixyz) =
-                    filter[0] * strided_grid(wraparound) +
-                    filter[1] * strided_grid(ixyz) +
-                    filter[2] *
-                        strided_grid(
-                            ixyz + ddc::DiscreteVector<DDimInWhichToTransform>(
-                                       current_stride));
-              }
             }
           });
     }
