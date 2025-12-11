@@ -525,6 +525,23 @@ void fence_all_instances(InstancesType const &instances) {
   }
 }
 
+template <typename... DDims>
+std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
+    std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
+    std::array<long int, sizeof...(DDims)> maximum_level,
+    ddc::DiscreteElement<DDims...> lbound) {
+  std::vector<ddc::StridedDiscreteDomain<DDims...>> component_grid_domains;
+  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+    auto &level = all_levels[grid_index];
+    component_grid_domains.emplace_back(
+        strided_domain_from_level(level, maximum_level, lbound));
+    // component_grid_domains.emplace_back(restrict_strided_with_discrete(
+    //     strided_domain_from_level(level, maximum_level, lbound),
+    //     local_domain)); #TODO
+  }
+  return component_grid_domains;
+}
+
 template <size_t dimensionality>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
@@ -593,23 +610,22 @@ void run_combination_technique(
                               -1, -1, -1, -1, -1, -1, -1, -1};
   }
   assert(all_levels.size() == all_combi_coefficients.size());
-  std::vector<SDDom> component_grid_domains;
+  auto component_grid_domains =
+      get_strided_domains(all_levels, maximum_level, lbound_all);
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data;
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
-    component_grid_domains.emplace_back(
-        strided_domain_from_level(level, maximum_level, lbound_all));
     level_data.emplace_back(ddc::Chunk(
         "strided_grid_" + std::to_string(grid_index),
-        component_grid_domains.back(), ddc::DeviceAllocator<double>()));
+        component_grid_domains[grid_index], ddc::DeviceAllocator<double>()));
     auto strided_grid = level_data.back().span_view();
 
     // initialize!
     ddc::parallel_for_each(
-        instances[grid_index % instances.size()], component_grid_domains.back(),
-        KOKKOS_LAMBDA(DElem const ixyz) {
+        instances[grid_index % instances.size()],
+        component_grid_domains[grid_index], KOKKOS_LAMBDA(DElem const ixyz) {
           double const x =
               ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
           double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
