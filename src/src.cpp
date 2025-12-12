@@ -61,6 +61,66 @@ using DElemY = ddc::DiscreteElement<DDimY>;
 struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 
+template <class HeadTag, class... Tags>
+static ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
+    ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
+    ddc::DiscreteVector<HeadTag, Tags...> const &strides,
+    ddc::DiscreteElement<HeadTag, Tags...> const &other_begin) {
+  // get the first element in strided that's >= other_begin
+  auto const stride = ddc::DiscreteVector<HeadTag>(strides);
+  ddc::DiscreteElement<HeadTag> new_head_begin =
+      ddc::select<HeadTag>(strided_begin) +
+      ddc::DiscreteVector<HeadTag>(
+          std::ceil(ddc::DiscreteVector<HeadTag>(other_begin - strided_begin) /
+                    static_cast<float>(stride)) *
+          stride);
+  if constexpr (sizeof...(Tags) == 0) {
+    return new_head_begin;
+  } else {
+    return ddc::DiscreteElement<HeadTag, Tags...>(
+        new_head_begin,
+        get_intersected_begin<Tags...>(ddc::select<Tags...>(strided_begin),
+                                       ddc::select<Tags...>(strides),
+                                       ddc::select<Tags...>(other_begin)));
+  }
+}
+
+template <typename HeadTag, typename... Tags>
+ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
+    ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
+    ddc::DiscreteVector<HeadTag, Tags...> const &strides,
+    ddc::DiscreteElement<HeadTag, Tags...> const &other_back) {
+  ddc::DiscreteVector<HeadTag> head_result;
+  ddc::detail::array(head_result) = {
+      (ddc::DiscreteVector<HeadTag>(other_back - strided_begin)) /
+          strides.template get<HeadTag>() +
+      1};
+  if constexpr (sizeof...(Tags) == 0) {
+    return head_result;
+  } else {
+    return ddc::DiscreteVector<HeadTag, Tags...>(
+        head_result,
+        get_intersected_extent<Tags...>(ddc::select<Tags...>(strided_begin),
+                                        ddc::select<Tags...>(strides),
+                                        ddc::select<Tags...>(other_back)));
+  }
+}
+
+template <class... DDims>
+constexpr auto restrict_strided_with_discrete(
+    ddc::StridedDiscreteDomain<DDims...> const &thisdomain,
+    ddc::DiscreteDomain<DDims...> const &odomain) {
+  // return new strided domain that is the intersection of thisdomain and
+  // odomain similar to
+  // https://github.com/CExA-project/ddc/blob/d60eec09/include/ddc/discrete_domain.hpp#L197
+  ddc::DiscreteElement<DDims...> newbegin = get_intersected_begin<DDims...>(
+      thisdomain.front(), thisdomain.strides(), odomain.front());
+  auto newextents = get_intersected_extent<DDims...>(
+      newbegin, thisdomain.strides(), odomain.back());
+  return ddc::StridedDiscreteDomain<DDims...>(newbegin, newextents,
+                                              thisdomain.strides());
+}
+
 template <typename... DDims>
 ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
@@ -285,7 +345,8 @@ bool hierarchize_in(
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize, DDims...>(level);
   auto const ddc_min_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize, DDims...>(minimum_level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(
+          minimum_level);
 
   auto decreasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
@@ -313,7 +374,8 @@ bool dehierarchize_in(
   auto const ddc_level_1d_vec =
       get_dimension_component<DDimInWhichToHierarchize, DDims...>(level);
   auto const ddc_min_level_1d_vec =
-      get_dimension_component<DDimInWhichToHierarchize, DDims...>(minimum_level);
+      get_dimension_component<DDimInWhichToHierarchize, DDims...>(
+          minimum_level);
 
   auto increasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
