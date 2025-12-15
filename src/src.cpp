@@ -17,14 +17,6 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
 
-template <typename... DDims>
-auto array_to_ddc_vector(std::array<long int, sizeof...(DDims)> const &arr) {
-  // TODO temporary solution until assignment from std::array is implemented
-  ddc::DiscreteVector<DDims...> ddc_vec;
-  ddc::detail::array(ddc_vec) = arr;
-  return ddc_vec;
-}
-
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
 
 #define DIMENSIONALITY 2
@@ -139,16 +131,14 @@ ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
   std::array<long int, dimensionality> resolution;
   std::ranges::transform(level, resolution.begin(),
                          [](long int l) { return (1 << l); });
-  ddc::DiscreteVector<DDims...> resolution_all =
-      array_to_ddc_vector<DDims...>(resolution);
+  ddc::DiscreteVector<DDims...> resolution_all(resolution);
   std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << l); });
-  ddc::DiscreteVector<DDims...> strides_all =
-      array_to_ddc_vector<DDims...>(stride);
+  ddc::DiscreteVector<DDims...> strides_all(stride);
   return ddc::StridedDiscreteDomain<DDims...>(lbound, resolution_all,
                                               strides_all);
 }
@@ -177,16 +167,13 @@ ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
       half_stride[i] = 0; // no offset
     }
   }
-  ddc::DiscreteVector<DDims...> resolution_all =
-      array_to_ddc_vector<DDims...>(resolution);
-  ddc::DiscreteVector<DDims...> half_stride_vect =
-      array_to_ddc_vector<DDims...>(half_stride);
+  ddc::DiscreteVector<DDims...> resolution_all(resolution);
+  ddc::DiscreteVector<DDims...> half_stride_vect(half_stride);
   ddc::DiscreteElement<DDims...> start_all = lbound + half_stride_vect;
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << (l + 1)); });
-  ddc::DiscreteVector<DDims...> strides_all =
-      array_to_ddc_vector<DDims...>(stride);
+  ddc::DiscreteVector<DDims...> strides_all(stride);
   return ddc::StridedDiscreteDomain<DDims...>(start_all, resolution_all,
                                               strides_all);
 }
@@ -272,8 +259,7 @@ bool transform_in(
     assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
            strided_domain.strides().template get<DDimInWhichToTransform>());
   }
-  ddc::DiscreteVector<DDims...> current_level =
-      array_to_ddc_vector<DDims...>(level);
+  ddc::DiscreteVector<DDims...> current_level(level);
 
   for (long int current_1d_level : one_d_level_range) {
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
@@ -626,7 +612,7 @@ void run_combination_technique(
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
                  [](int ml) { return (1 << ml) + 1; });
-  DVect resolution_all = array_to_ddc_vector<DDims...>(resolution);
+  DVect resolution_all(resolution);
 
   // discrete domain in 3d, for the full grid but not allocated yet
   auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(
