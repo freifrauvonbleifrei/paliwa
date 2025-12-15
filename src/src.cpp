@@ -61,62 +61,71 @@ using DElemY = ddc::DiscreteElement<DDimY>;
 struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 
-template <class HeadTag, class... Tags>
+template <typename OtherElementType, typename HeadTag, typename... Tags>
 static ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
     ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
     ddc::DiscreteVector<HeadTag, Tags...> const &strides,
-    ddc::DiscreteElement<HeadTag, Tags...> const &other_begin) {
+    OtherElementType const &other_begin) {
   // get the first element in strided that's >= other_begin
-  auto const stride = ddc::DiscreteVector<HeadTag>(strides);
+  auto const stride = ddc::select<HeadTag>(strides);
+  auto const strided_begin_head = ddc::select<HeadTag>(strided_begin);
+  auto const other_or_same_begin = ddc::select_or<HeadTag>(
+      other_begin,
+      strided_begin_head); // in case other_begin does not have this dim
   ddc::DiscreteElement<HeadTag> new_head_begin =
-      ddc::select<HeadTag>(strided_begin) +
+      strided_begin_head +
       ddc::DiscreteVector<HeadTag>(
-          std::ceil(ddc::DiscreteVector<HeadTag>(other_begin - strided_begin) /
+          std::ceil((other_or_same_begin - strided_begin_head) /
                     static_cast<float>(stride)) *
           stride);
   if constexpr (sizeof...(Tags) == 0) {
     return new_head_begin;
   } else {
     return ddc::DiscreteElement<HeadTag, Tags...>(
-        new_head_begin,
-        get_intersected_begin<Tags...>(ddc::select<Tags...>(strided_begin),
-                                       ddc::select<Tags...>(strides),
-                                       ddc::select<Tags...>(other_begin)));
+        new_head_begin, get_intersected_begin<OtherElementType, Tags...>(
+                            ddc::select<Tags...>(strided_begin),
+                            ddc::select<Tags...>(strides), other_begin));
   }
 }
 
-template <typename HeadTag, typename... Tags>
-ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
+template <class HeadTag, class... Tags, class... OtherTags>
+constexpr ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
     ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
     ddc::DiscreteVector<HeadTag, Tags...> const &strides,
-    ddc::DiscreteElement<HeadTag, Tags...> const &other_back) {
+    ddc::DiscreteVector<HeadTag, Tags...> const &strided_extents,
+    ddc::DiscreteElement<OtherTags...> const &other_back) {
   ddc::DiscreteVector<HeadTag> head_result;
-  ddc::detail::array(head_result) = {
-      (ddc::DiscreteVector<HeadTag>(other_back - strided_begin)) /
-          strides.template get<HeadTag>() +
-      1};
+  if constexpr (ddc::in_tags_v<HeadTag, ddc::detail::TypeSeq<OtherTags...>>) {
+    ddc::detail::array(head_result) = {(ddc::select<HeadTag>(other_back) -
+                                        ddc::select<HeadTag>(strided_begin)) /
+                                           strides.template get<HeadTag>() +
+                                       1};
+  } else {
+    head_result = ddc::select<HeadTag>(strided_extents);
+  }
   if constexpr (sizeof...(Tags) == 0) {
     return head_result;
   } else {
     return ddc::DiscreteVector<HeadTag, Tags...>(
         head_result,
-        get_intersected_extent<Tags...>(ddc::select<Tags...>(strided_begin),
-                                        ddc::select<Tags...>(strides),
-                                        ddc::select<Tags...>(other_back)));
+        get_intersected_extent(ddc::select<Tags...>(strided_begin),
+                               ddc::select<Tags...>(strides),
+                               ddc::select<Tags...>(strided_extents),
+                               ddc::select<OtherTags...>(other_back)));
   }
 }
 
-template <class... DDims>
+template <typename DDom, typename... DDims>
 constexpr auto restrict_strided_with_discrete(
     ddc::StridedDiscreteDomain<DDims...> const &thisdomain,
-    ddc::DiscreteDomain<DDims...> const &odomain) {
+    DDom const &odomain) {
   // return new strided domain that is the intersection of thisdomain and
   // odomain similar to
   // https://github.com/CExA-project/ddc/blob/d60eec09/include/ddc/discrete_domain.hpp#L197
-  ddc::DiscreteElement<DDims...> newbegin = get_intersected_begin<DDims...>(
+  ddc::DiscreteElement<DDims...> newbegin = get_intersected_begin(
       thisdomain.front(), thisdomain.strides(), odomain.front());
-  auto newextents = get_intersected_extent<DDims...>(
-      newbegin, thisdomain.strides(), odomain.back());
+  auto newextents = get_intersected_extent(
+      newbegin, thisdomain.strides(), thisdomain.extents(), odomain.back());
   return ddc::StridedDiscreteDomain<DDims...>(newbegin, newextents,
                                               thisdomain.strides());
 }
@@ -631,7 +640,6 @@ void run_combination_technique(
   ddc::DiscreteDomain<DDimY> const y_domain =
       y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
   DDom dom_all;
-  DElem lbound_all;
   if constexpr (dimensionality == 3) {
     auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(
         DDimZ::init<DDimZ>(ddc::Coordinate<Z>(0.0), ddc::Coordinate<Z>(1.0),
@@ -640,11 +648,10 @@ void run_combination_technique(
         z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
 
     dom_all = DDom(x_domain, y_domain, z_domain);
-    lbound_all = DElem(0, 0, 0);
   } else if constexpr (dimensionality == 2) {
     dom_all = DDom(x_domain, y_domain);
-    lbound_all = DElem(0, 0);
   }
+  DElem lbound_all = DElem({});
 
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   DDom const local_domain =
