@@ -19,6 +19,10 @@ jobs:
         buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
         color: true       # Force color output (SPACK_COLOR=always)
         path: spack       # Where to clone Spack
+    - name: Install system dependencies
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc python3
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
