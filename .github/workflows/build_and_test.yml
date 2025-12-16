@@ -1,0 +1,39 @@
+name: Build and Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+  
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    # cf. https://github.com/spack/setup-spack
+    - name: Set up Spack
+      uses: spack/setup-spack@v2
+      with:
+        ref: develop      # Spack version (examples: develop, releases/v0.23)
+        buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
+        color: true       # Force color output (SPACK_COLOR=always)
+        path: spack       # Where to clone Spack
+    - name: Set up ddc-env
+      shell: spack-bash {0}
+      run: |
+        spack env create ddc-env
+        spack env activate ddc-env
+        spack env add ddc@main -splines #...+cuda cuda_arch=...
+        spack env add py-pip
+        spack install
+        spack env status
+    - name: Build with CMake
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=Debug ..
+        make -j
+        
