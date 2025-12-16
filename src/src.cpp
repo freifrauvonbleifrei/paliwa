@@ -15,6 +15,7 @@
 
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
+#include <Kokkos_Random.hpp>
 #include <Kokkos_StdAlgorithms.hpp>
 
 #define PERIODIC_DOMAIN // Comment this to run non-periodic simulation
@@ -372,6 +373,98 @@ bool dehierarchize_in(DDomainType const &strided_domain,
       increasing_range,
       lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
       instance);
+}
+
+template <typename SelectedDim, typename SDDom> // typename... DDims>
+ddc::SparseDiscreteDomain<SelectedDim> get_required_hierarchization_domain(
+    SDDom const &full_domain, SDDom const &local_domain,
+    ddc::DiscreteVector<SelectedDim> const &level,
+    ddc::DiscreteVector<SelectedDim> const &minimum_level,
+    ddc::DiscreteVector<SelectedDim> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  // dehierarchize a 1d pole, where all is initialized to 0 except for the
+  // local domain, to get all indices that will be required for hierarchization
+  using DElem = ddc::DiscreteElement<SelectedDim>;
+
+  // initialize full pole to zero
+  ddc::Chunk full_pole_chunk("full_pole_chunk", full_domain,
+                             ddc::HostAllocator<double>());
+  auto full_pole = full_pole_chunk.span_view();
+  // cf.
+  // https://kokkos.org/kokkos-core-wiki/API/algorithms/Random-Number.html#example
+  Kokkos::Random_XorShift64_Pool<Kokkos::HostSpace> random_pool(/*seed=*/12345);
+  ddc::parallel_for_each(
+      Kokkos::DefaultHostExecutionSpace(), local_domain,
+      KOKKOS_LAMBDA(DElem const ixyz) {
+        auto generator = random_pool.get_state();
+        double random_number = generator.drand(0., 1.);
+        random_pool.free_state(generator);
+        full_pole(ixyz) = ixyz.uid() * 100000.0 *
+                          (2 + random_number); // just some non-zero value
+        // TODO make all stencil values positive instead
+      });
+  dehierarchize_in<SelectedDim>(
+      full_domain, full_pole, level, minimum_level, maximum_level,
+      full_domain.front(), wavelet_name, Kokkos::DefaultHostExecutionSpace());
+
+  // set to 0.0 on local_domain
+  ddc::parallel_for_each(
+      Kokkos::DefaultHostExecutionSpace(), local_domain,
+      KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 0.0; });
+
+  // extract remaining indices to domain
+  Kokkos::View<DElem *, Kokkos::SharedSpace> required_elements(
+      "required_elements", full_domain.size());
+  size_t insert_index = 0;
+  ddc::for_each(full_domain,
+                [&required_elements, &full_pole, &insert_index](DElem ixyz) {
+                  if (full_pole(ixyz) != 0.0) {
+                    required_elements(insert_index++) = ixyz;
+                  }
+                });
+  Kokkos::resize(required_elements, insert_index);
+  return ddc::SparseDiscreteDomain<SelectedDim>(required_elements);
+}
+
+// TODO extra function to make recursion work
+template <typename HeadTag, typename... DDims>
+ddc::SparseDiscreteDomain<HeadTag, DDims...>
+get_required_hierarchization_domains_recursive(
+    ddc::StridedDiscreteDomain<HeadTag, DDims...> const &full_domain,
+    ddc::StridedDiscreteDomain<HeadTag, DDims...> const &local_domain,
+    ddc::DiscreteVector<HeadTag, DDims...> const &level,
+    ddc::DiscreteVector<HeadTag, DDims...> const &minimum_level,
+    ddc::DiscreteVector<HeadTag, DDims...> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  auto head_domain = get_required_hierarchization_domain<HeadTag>(
+      ddc::select<HeadTag>(full_domain), ddc::select<HeadTag>(local_domain),
+      ddc::select<HeadTag>(level), ddc::select<HeadTag>(minimum_level),
+      ddc::select<HeadTag>(maximum_level), wavelet_name);
+  if constexpr (sizeof...(DDims) == 0) {
+    return head_domain;
+  } else {
+    return ddc::SparseDiscreteDomain<HeadTag, DDims...>(
+        head_domain,
+        get_required_hierarchization_domains_recursive<DDims...>(
+            ddc::select<DDims...>(full_domain),
+            ddc::select<DDims...>(local_domain), ddc::select<DDims...>(level),
+            ddc::select<DDims...>(minimum_level),
+            ddc::select<DDims...>(maximum_level), wavelet_name));
+  }
+}
+
+template <typename... DDims>
+ddc::SparseDiscreteDomain<DDims...> get_required_hierarchization_domains(
+    ddc::StridedDiscreteDomain<DDims...> const &full_domain,
+    ddc::StridedDiscreteDomain<DDims...> const &local_domain,
+    ddc::DiscreteVector<DDims...> const &level,
+    ddc::DiscreteVector<DDims...> const &minimum_level,
+    ddc::DiscreteVector<DDims...> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  return ddc::SparseDiscreteDomain<DDims...>(
+      get_required_hierarchization_domains_recursive<DDims...>(
+          full_domain, local_domain, level, minimum_level, maximum_level,
+          wavelet_name));
 }
 
 template <typename DDomainType, typename ChunkSpanType,
