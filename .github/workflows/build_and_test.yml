@@ -23,10 +23,10 @@ jobs:
       shell: spack-bash {0}
       run: |
         spack env create ddc-env
+        spack --env ddc-env add ddc@main -splines #...+cuda cuda_arch=...
+        spack --env ddc-env add py-pip
+        spack --env ddc-env install
         spack env activate ddc-env
-        spack env add ddc@main -splines #...+cuda cuda_arch=...
-        spack env add py-pip
-        spack install
         spack env status
     - name: Build with CMake
       shell: spack-bash {0}
