@@ -3,9 +3,9 @@
 #include <ranges>
 #include <vector>
 
-#include <ddc/ddc.hpp>
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Random.hpp>
+#include <ddc/ddc.hpp>
 
 #include "paliwa_domains.hpp"
 #include "paliwa_wavelets.hpp"

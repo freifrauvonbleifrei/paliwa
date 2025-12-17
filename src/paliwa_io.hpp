@@ -2,8 +2,8 @@
 
 #include <fstream>
 
-#include <ddc/ddc.hpp>
 #include <Kokkos_Core.hpp>
+#include <ddc/ddc.hpp>
 
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,

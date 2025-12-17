@@ -6,9 +6,24 @@
 #include <Kokkos_Core.hpp>
 #include <ddc/ddc.hpp>
 
+#ifdef PALIWA_WITH_MPI
 #include <mpi.h>
+#endif // PALIWA_WITH_MPI
 
 #include "paliwa_utils.hpp"
+
+struct MPIOptionalGuard {
+  MPIOptionalGuard(int &argc, char **&argv) {
+#ifdef PALIWA_WITH_MPI
+    MPI_Init(&argc, &argv);
+#endif // PALIWA_WITH_MPI
+  }
+  ~MPIOptionalGuard() {
+#ifdef PALIWA_WITH_MPI
+    MPI_Finalize();
+#endif // PALIWA_WITH_MPI
+  }
+};
 
 template <class HeadTag, class... Tags>
 static ddc::DiscreteDomain<HeadTag, Tags...>
@@ -48,6 +63,7 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
                                                remaining_idx_range);
 }
 
+#ifdef PALIWA_WITH_MPI
 template <typename DiscreteDomainType>
 std::pair<DiscreteDomainType, MPI_Comm> decompose_domain_on_communicator(
     DiscreteDomainType const &global_domain, MPI_Comm comm,
@@ -89,3 +105,6 @@ std::pair<DiscreteDomainType, MPI_Comm> decompose_domain_on_communicator(
   return {distribute_idx_range(global_domain, par_vector_dv, my_coords_dv),
           comm_cart};
 }
+
+
+#endif // PALIWA_WITH_MPI
