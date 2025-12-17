@@ -41,7 +41,7 @@ jobs:
       run: |
         spack env activate ddc-env
         mkdir build
+        cmake -DCMAKE_BUILD_TYPE=Debug -B build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Debug ..
         make -j
         
