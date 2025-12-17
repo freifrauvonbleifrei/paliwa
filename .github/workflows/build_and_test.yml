@@ -31,7 +31,7 @@ jobs:
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
         spack env create ddc-env
-        spack --env ddc-env add ddc@main -splines #...+cuda cuda_arch=...
+        spack --env ddc-env add ddc@main -splines -fft #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip
         spack --env ddc-env install
         spack env activate ddc-env
