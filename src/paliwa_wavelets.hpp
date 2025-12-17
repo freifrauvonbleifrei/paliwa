@@ -1,0 +1,19 @@
+#pragma once
+
+#include <vector>
+
+// TODO consider making this constexpr frozen::map ?
+static const std::map<std::string,
+                      std::vector<std::pair<int, std::array<double, 3>>>>
+    lifting_wavelet_filter_offsets_and_coefficients = {
+        {"hat", {{1, {-0.5, 1.0, -0.5}}}},
+        {"biorthogonal", {{1, {-0.5, 1.0, -0.5}}, {0, {0.25, 1.0, 0.25}}}},
+        {"fullweighting", {{0, {0.25, 0.5, 0.25}}, {1, {-0.5, 1.0, -0.5}}}},
+};
+static const std::map<std::string,
+                      std::vector<std::pair<int, std::array<double, 3>>>>
+    lifting_wavelet_reconstruct_offsets_and_coefficients = {
+        {"hat", {{1, {0.5, 1.0, 0.5}}}},
+        {"biorthogonal", {{0, {-0.25, 1.0, 0.25}}, {1, {0.5, 1.0, 0.5}}}},
+        {"fullweighting", {{1, {0.5, 1.0, 0.5}}, {0, {-0.5, 2.0, -0.5}}}},
+};
