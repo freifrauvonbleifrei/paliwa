@@ -26,7 +26,10 @@ jobs:
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
+        spack compiler find
         spack external find
+        spack config add "packages:cmake:buildable:false"
+        spack config add "packages:python:buildable:false"
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip
