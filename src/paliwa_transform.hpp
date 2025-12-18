@@ -10,6 +10,8 @@
 #include "paliwa_domains.hpp"
 #include "paliwa_wavelets.hpp"
 
+namespace paliwa {
+
 template <typename DDimInWhichToTransform,
           typename DDomainType,   // TODO either DDom or SDDom or SparseDDom
           typename ChunkSpanType, // TODO w.r.t. DDomainType
@@ -300,3 +302,4 @@ ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
           is_for_hierarchization, full_domain, local_domain, level,
           minimum_level, maximum_level, wavelet_name));
 }
+} // namespace paliwa

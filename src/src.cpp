@@ -124,7 +124,8 @@ void run_combination_technique(
 
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   auto const [local_domain, cartesian_comm] =
-      decompose_domain_on_communicator(dom_all, comm, parallelization_vector);
+      paliwa::decompose_domain_on_communicator(dom_all, comm,
+                                               parallelization_vector);
 
   std::array<long int, dimensionality> minimum_level;
   std::vector<std::array<long int, dimensionality>> all_levels;
@@ -145,11 +146,11 @@ void run_combination_technique(
   DVect const ddc_maximum_level(maximum_level);
   assert(all_levels.size() == all_combi_coefficients.size());
   auto component_grid_domains =
-      get_strided_domains(all_levels, maximum_level, lbound_all);
+      paliwa::get_strided_domains(all_levels, maximum_level, lbound_all);
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data = initialize_combination_scheme(component_grid_domains,
                                                  all_levels, instances);
-  fence_all_instances(instances);
+  paliwa::fence_all_instances(instances);
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
@@ -163,7 +164,7 @@ void run_combination_technique(
     }
     level_str += std::to_string(dimensionality) + "d";
     std::string const filename = "strided_grid_" + level_str + ".raw";
-    dump_chunk_span_to_binary_file(strided_grid, filename);
+    paliwa::dump_chunk_span_to_binary_file(strided_grid, filename);
     // std::cout << strided_grid << std::endl; (-> issue)
     ddc::print_content(std::cout, strided_grid) << std::endl;
   }
@@ -175,11 +176,11 @@ void run_combination_technique(
     SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    hierarchize(strided_domain, strided_grid, level, ddc_minimum_level,
+    paliwa::hierarchize(strided_domain, strided_grid, level, ddc_minimum_level,
                 ddc_maximum_level, lbound_all, wavelet_name,
                 instances[grid_index % instances.size()]);
   }
-  fence_all_instances(instances);
+  paliwa::fence_all_instances(instances);
 
   // sparse grid!
   std::map<std::array<long int, dimensionality>, int> subspace_count;
@@ -195,7 +196,8 @@ void run_combination_technique(
           };
   for (const auto &level : all_levels) {
     std::array<long int, dimensionality> tmp_level;
-    iterate_hierarchical_subspaces(level, tmp_level, 0, insert_function);
+    paliwa::iterate_hierarchical_subspaces(level, tmp_level, 0,
+                                           insert_function);
   }
 
   Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
@@ -219,7 +221,7 @@ void run_combination_technique(
     auto const &subspace_level = subspace_level_and_count.first;
     auto const &count = subspace_level_and_count.second;
     if (count > 1) {
-      auto subspace_domain = strided_hierarchical_domain_from_level(
+      auto subspace_domain = paliwa::strided_hierarchical_domain_from_level(
           subspace_level, maximum_level, lbound_all);
       accumulated_size += subspace_domain.size();
       subspaces_levels_host.insert(used_subspace_number, subspace_level);
@@ -287,7 +289,7 @@ void run_combination_technique(
       }
     }
   }
-  fence_all_instances(instances);
+  paliwa::fence_all_instances(instances);
 
   // interpolate all onto full grid
   // allocate and initialize to 0
@@ -313,12 +315,13 @@ void run_combination_technique(
           });
     }
   }
-  fence_all_instances(instances);
+  paliwa::fence_all_instances(instances);
 
   //   de-hierarchize on the combined full grid
-  dehierarchize(dom_all, full_grid_view, ddc_maximum_level, ddc_minimum_level,
-                ddc_maximum_level, lbound_all, wavelet_name, instances[0]);
-  fence_all_instances(instances);
+  paliwa::dehierarchize(dom_all, full_grid_view, ddc_maximum_level,
+                        ddc_minimum_level, ddc_maximum_level, lbound_all,
+                        wavelet_name, instances[0]);
+  paliwa::fence_all_instances(instances);
 
   std::string max_level_str = "";
   for (auto l : maximum_level) {
@@ -326,7 +329,7 @@ void run_combination_technique(
   }
   max_level_str += std::to_string(dimensionality) + "d";
   std::string const filename = "full_grid_" + max_level_str + ".raw";
-  dump_chunk_span_to_binary_file(full_grid_view, filename);
+  paliwa::dump_chunk_span_to_binary_file(full_grid_view, filename);
   std::cout << "Wrote full grid to " << filename << std::endl;
   double const mean_value =
       ddc::parallel_transform_reduce(dom_all, 0., ddc::reducer::sum<double>(),
@@ -355,7 +358,7 @@ void run_combination_technique_in_dimensions(
 }
 
 int main(int argc, char **argv) {
-  [[maybe_unused]] MPIOptionalGuard mpi(argc, argv);
+  [[maybe_unused]] paliwa::MPIOptionalGuard mpi(argc, argv);
   Kokkos::ScopeGuard const kokkos_scope(argc, argv);
 #ifndef NDEBUG
   int world_size, world_rank;

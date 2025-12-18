@@ -5,6 +5,8 @@
 #include <Kokkos_Core.hpp>
 #include <ddc/ddc.hpp>
 
+namespace paliwa {
+
 template <typename ChunkType>
 void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
@@ -16,3 +18,4 @@ void dump_chunk_span_to_binary_file(ChunkType const span,
                sizeof(host_mirror_view.data_handle()[i]));
   }
 }
+} // namespace paliwa

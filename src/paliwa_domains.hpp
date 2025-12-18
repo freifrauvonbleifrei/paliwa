@@ -4,6 +4,8 @@
 
 #include <ddc/ddc.hpp>
 
+namespace paliwa {
+
 template <typename... DDims>
 ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
@@ -179,3 +181,5 @@ constexpr auto restrict_strided_with_discrete(
   return ddc::StridedDiscreteDomain<DDims...>(newbegin, newextents,
                                               thisdomain.strides());
 }
+
+} // namespace paliwa

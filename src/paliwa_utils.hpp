@@ -1,5 +1,7 @@
 #pragma once
 
+namespace paliwa {
+
 template <typename T> // with T for example std::array<long int, dimensionality>
 void iterate_hierarchical_subspaces(
     const T &nodal_level, T &tmp_level, size_t current_dim,
@@ -23,3 +25,5 @@ void fence_all_instances(InstancesType const &instances) {
     instance.fence();
   }
 }
+
+} // namespace paliwa

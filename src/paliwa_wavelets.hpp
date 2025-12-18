@@ -2,6 +2,7 @@
 
 #include <vector>
 
+namespace paliwa {
 // TODO consider making this constexpr frozen::map ?
 static const std::map<std::string,
                       std::vector<std::pair<int, std::array<double, 3>>>>
@@ -17,3 +18,4 @@ static const std::map<std::string,
         {"biorthogonal", {{0, {-0.25, 1.0, 0.25}}, {1, {0.5, 1.0, 0.5}}}},
         {"fullweighting", {{1, {0.5, 1.0, 0.5}}, {0, {-0.5, 2.0, -0.5}}}},
 };
+} // namespace paliwa

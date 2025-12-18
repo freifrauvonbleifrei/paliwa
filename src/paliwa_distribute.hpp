@@ -10,7 +10,10 @@
 #include <mpi.h>
 #endif // PALIWA_WITH_MPI
 
+#include "paliwa_transform.hpp"
 #include "paliwa_utils.hpp"
+
+namespace paliwa {
 
 struct MPIOptionalGuard {
   MPIOptionalGuard(int &argc, char **&argv) {
@@ -108,3 +111,4 @@ std::pair<DiscreteDomainType, MPI_Comm> decompose_domain_on_communicator(
 
 
 #endif // PALIWA_WITH_MPI
+} // namespace paliwa
