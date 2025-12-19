@@ -40,12 +40,12 @@ void test_transform_hat_stays_same_2d() {
             strided_grid(ixy) =
                 (1 + ixy.uid<DDimX>() + ixy.uid<DDimY>()) * (1 + random_number);
           });
-      auto strided_grid_host_before = ddc::create_mirror_view_and_copy(
+      auto strided_grid_host_before = ddc::create_mirror_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
 
       paliwa::hierarchize(strided_grid, level, minimum_level, maximum_level,
                           "hat", Kokkos::DefaultExecutionSpace());
-      auto strided_grid_host = ddc::create_mirror_view_and_copy(
+      auto strided_grid_host = ddc::create_mirror_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
       SDDom const strided_domain_lmin =
           paliwa::strided_domain_from_level<DDimX, DDimY>(
