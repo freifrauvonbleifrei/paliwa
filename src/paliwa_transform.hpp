@@ -118,7 +118,7 @@ bool hierarchize_in(DDomainType const &strided_domain,
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
   assert(ddc_level_1d_vec >= ddc_min_level_1d_vec);
-  assert(ddc_min_level_1d_vec > 0);
+  assert(ddc_min_level_1d_vec >= 0);
   assert(ddc_level_1d_vec <=
          ddc::select<DDimInWhichToHierarchize>(maximum_level));
 
@@ -149,7 +149,7 @@ bool dehierarchize_in(DDomainType const &strided_domain,
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
   assert(ddc_level_1d_vec >= ddc_min_level_1d_vec);
-  assert(ddc_min_level_1d_vec > 0);
+  assert(ddc_min_level_1d_vec >= 0);
   assert(ddc_level_1d_vec <=
          ddc::select<DDimInWhichToHierarchize>(maximum_level));
 
