@@ -124,7 +124,6 @@ void run_combination_technique(
   } else if constexpr (dimensionality == 2) {
     dom_all = DDom(x_domain, y_domain);
   }
-  DElem lbound_all = DElem({});
 
   std::array<int, dimensionality> parallelization_vector = {2, 2};
   auto const [local_domain, cartesian_comm] =
@@ -150,7 +149,7 @@ void run_combination_technique(
   DVect const ddc_maximum_level(maximum_level);
   assert(all_levels.size() == all_combi_coefficients.size());
   auto component_grid_domains =
-      paliwa::get_strided_domains(all_levels, maximum_level, lbound_all);
+      paliwa::get_strided_domains<DDims...>(all_levels, maximum_level);
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data = initialize_combination_scheme(component_grid_domains,
                                                  all_levels, instances);
@@ -181,8 +180,8 @@ void run_combination_technique(
     auto strided_grid = level_data[grid_index].span_view();
 
     paliwa::hierarchize(strided_grid, level, ddc_minimum_level,
-                ddc_maximum_level, lbound_all, wavelet_name,
-                instances[grid_index % instances.size()]);
+                        ddc_maximum_level, wavelet_name,
+                        instances[grid_index % instances.size()]);
   }
   paliwa::fence_all_instances(instances);
 
@@ -225,8 +224,9 @@ void run_combination_technique(
     auto const &subspace_level = subspace_level_and_count.first;
     auto const &count = subspace_level_and_count.second;
     if (count > 1) {
-      auto subspace_domain = paliwa::strided_hierarchical_domain_from_level(
-          subspace_level, maximum_level, lbound_all);
+      auto subspace_domain =
+          paliwa::strided_hierarchical_domain_from_level<DDims...>(
+              subspace_level, maximum_level);
       accumulated_size += subspace_domain.size();
       subspaces_levels_host.insert(used_subspace_number, subspace_level);
       subspaces_domains_and_data_pointers_host.insert(
@@ -323,8 +323,7 @@ void run_combination_technique(
 
   //   de-hierarchize on the combined full grid
   paliwa::dehierarchize(full_grid_view, ddc_maximum_level, ddc_minimum_level,
-                        ddc_maximum_level, lbound_all, wavelet_name,
-                        instances[0]);
+                        ddc_maximum_level, wavelet_name, instances[0]);
   paliwa::fence_all_instances(instances);
 
   std::string max_level_str = "";

@@ -3,9 +3,10 @@
 namespace paliwa {
 
 template <typename T> // with T for example std::array<long int, dimensionality>
-constexpr void iterate_hierarchical_subspaces(
-    const T &nodal_level, T &tmp_level, size_t current_dim,
-    const std::function<void(const T &)> &callback) {
+constexpr void
+iterate_hierarchical_subspaces(const T &nodal_level, T &tmp_level,
+                               size_t current_dim,
+                               const std::function<void(const T &)> &callback) {
   assert(tmp_level.size() == nodal_level.size());
   if (current_dim < nodal_level.size()) {
     for (tmp_level[current_dim] = 0;

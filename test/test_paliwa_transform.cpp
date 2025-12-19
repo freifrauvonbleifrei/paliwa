@@ -23,51 +23,51 @@ void test_transform_hat_stays_same_2d() {
     for (long int min_level_y : {0, 1, 3}) {
       DVect const minimum_level(
           std::array<long int, 2>({min_level_x, min_level_y}));
-    SDDom strided_domain = // indices 0, 2, ...14
-        paliwa::strided_domain_from_level(ddc::detail::array(level),
-                                          ddc::detail::array(maximum_level),
-                                          DElem({}));
-    ddc::Chunk strided_grid_chunk(strided_domain,
-                                  ddc::DeviceAllocator<double>());
-    auto strided_grid = strided_grid_chunk.span_view();
-    // fill with random data
-    Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
-    ddc::parallel_for_each(
-        Kokkos::DefaultExecutionSpace(), strided_domain,
-        KOKKOS_LAMBDA(DElem const ixy) {
-          auto generator = random_pool.get_state();
-          double random_number = generator.drand(0., 1.);
-          random_pool.free_state(generator);
-          strided_grid(ixy) =
-              (1 + ixy.uid<DDimX>() + ixy.uid<DDimY>()) * (1 + random_number);
-        });
-    auto strided_grid_host_before = ddc::create_mirror_view_and_copy(
-        Kokkos::SharedHostPinnedSpace(), strided_grid);
+      SDDom strided_domain = // indices 0, 2, ...14
+          paliwa::strided_domain_from_level<DDimX, DDimY>(
+              ddc::detail::array(level), ddc::detail::array(maximum_level));
+      ddc::Chunk strided_grid_chunk(strided_domain,
+                                    ddc::DeviceAllocator<double>());
+      auto strided_grid = strided_grid_chunk.span_view();
+      // fill with random data
+      Kokkos::Random_XorShift64_Pool<> random_pool(/*seed=*/12345);
+      ddc::parallel_for_each(
+          Kokkos::DefaultExecutionSpace(), strided_domain,
+          KOKKOS_LAMBDA(DElem const ixy) {
+            auto generator = random_pool.get_state();
+            double random_number = generator.drand(0., 1.);
+            random_pool.free_state(generator);
+            strided_grid(ixy) =
+                (1 + ixy.uid<DDimX>() + ixy.uid<DDimY>()) * (1 + random_number);
+          });
+      auto strided_grid_host_before = ddc::create_mirror_view_and_copy(
+          Kokkos::SharedHostPinnedSpace(), strided_grid);
 
       paliwa::hierarchize(strided_grid, level, minimum_level, maximum_level,
-                          DElem({}), "hat", Kokkos::DefaultExecutionSpace());
-    auto strided_grid_host = ddc::create_mirror_view_and_copy(
-        Kokkos::SharedHostPinnedSpace(), strided_grid);
-    SDDom const strided_domain_lmin = paliwa::strided_domain_from_level(
-        ddc::detail::array(minimum_level), ddc::detail::array(maximum_level),
-        DElem({}));
-    ddc::host_for_each(strided_domain, [&](DElem const ixy) {
-      if (strided_domain_lmin.contains(ixy)) {
+                          "hat", Kokkos::DefaultExecutionSpace());
+      auto strided_grid_host = ddc::create_mirror_view_and_copy(
+          Kokkos::SharedHostPinnedSpace(), strided_grid);
+      SDDom const strided_domain_lmin =
+          paliwa::strided_domain_from_level<DDimX, DDimY>(
+              ddc::detail::array(minimum_level),
+              ddc::detail::array(maximum_level));
+      ddc::host_for_each(strided_domain, [&](DElem const ixy) {
+        if (strided_domain_lmin.contains(ixy)) {
           EXPECT_NEAR(strided_grid_host(ixy), strided_grid_host_before(ixy),
                       1e-14);
-      } else {
+        } else {
           EXPECT_NE(strided_grid_host(ixy), strided_grid_host_before(ixy));
-      }
-    });
+        }
+      });
 
       paliwa::dehierarchize(strided_grid, level, minimum_level, maximum_level,
-                            DElem({}), "hat", Kokkos::DefaultExecutionSpace());
-    auto strided_grid_host_after = ddc::create_mirror_view_and_copy(
-        Kokkos::SharedHostPinnedSpace(), strided_grid);
-    ddc::host_for_each(strided_domain, [&](DElem const ixy) {
-      EXPECT_NEAR(strided_grid_host_after(ixy), strided_grid_host_before(ixy),
-                  1e-13);
-    });
+                            "hat", Kokkos::DefaultExecutionSpace());
+      auto strided_grid_host_after = ddc::create_mirror_view_and_copy(
+          Kokkos::SharedHostPinnedSpace(), strided_grid);
+      ddc::host_for_each(strided_domain, [&](DElem const ixy) {
+        EXPECT_NEAR(strided_grid_host_after(ixy), strided_grid_host_before(ixy),
+                    1e-13);
+      });
     }
   }
 }
@@ -87,9 +87,8 @@ void test_transform_mass_conservation_2d(std::string wavelet_name) {
       DVect const minimum_level(
           std::array<long int, 2>({min_level_x, min_level_y}));
       SDDom strided_domain = // indices 0, 2, ...14
-          paliwa::strided_domain_from_level(ddc::detail::array(level),
-                                            ddc::detail::array(maximum_level),
-                                            DElem({}));
+          paliwa::strided_domain_from_level<DDimX, DDimY>(
+              ddc::detail::array(level), ddc::detail::array(maximum_level));
       ddc::Chunk strided_grid_chunk(strided_domain,
                                     ddc::DeviceAllocator<double>());
       auto strided_grid = strided_grid_chunk.span_view();
@@ -111,17 +110,17 @@ void test_transform_mass_conservation_2d(std::string wavelet_name) {
               ddc::reducer::sum<double>(), strided_grid) /
           strided_domain.size();
       paliwa::hierarchize(strided_grid, level, minimum_level, maximum_level,
-                          DElem({}), wavelet_name,
-                          Kokkos::DefaultExecutionSpace());
+                          wavelet_name, Kokkos::DefaultExecutionSpace());
       // // for lmin [0, 0], can check the first entry too
       // auto strided_grid_host = ddc::create_mirror_view_and_copy(
       //     Kokkos::SharedHostPinnedSpace(), strided_grid);
       // double coeff_00 = strided_grid_host(strided_domain.front());
       // EXPECT_NEAR(coeff_00, reference_average, 1e-10);
 
-      SDDom const strided_domain_lmin = paliwa::strided_domain_from_level(
-          ddc::detail::array(minimum_level), ddc::detail::array(maximum_level),
-          DElem({}));
+      SDDom const strided_domain_lmin =
+          paliwa::strided_domain_from_level<DDimX, DDimY>(
+              ddc::detail::array(minimum_level),
+              ddc::detail::array(maximum_level));
       double lmin_sum = ddc::parallel_transform_reduce(
           Kokkos::DefaultExecutionSpace(), strided_domain_lmin, 0.0,
           ddc::reducer::sum<double>(), strided_grid);

@@ -12,19 +12,18 @@
 
 namespace paliwa {
 
-template <typename DDimInWhichToTransform,
-          typename ChunkSpanType, // TODO w.r.t. DDomainType
-          typename LevelRange,    // TODO input_range concept
-          typename ExecSpace,     // todo = Kokkos::DefaultExecutionSpace,
+template <typename DDimInWhichToTransform, typename ChunkSpanType,
+          typename LevelRange, // TODO input_range concept
+          typename ExecSpace,  // todo = Kokkos::DefaultExecutionSpace,
           typename... DDims>
-constexpr bool transform_in(ChunkSpanType const strided_grid,
-                  ddc::DiscreteVector<DDims...> const &level,
-                  ddc::DiscreteVector<DDims...> const &maximum_level,
-                  ddc::DiscreteElement<DDims...> const &lbound,
-                  LevelRange const &one_d_level_range,
-                  std::vector<std::pair<int, std::array<double, 3>>> const
-                      &lifting_offsets_and_coefficients,
-                  ExecSpace instance = ExecSpace()) {
+constexpr bool
+transform_in(ChunkSpanType const strided_grid,
+             ddc::DiscreteVector<DDims...> const &level,
+             ddc::DiscreteVector<DDims...> const &maximum_level,
+             LevelRange const &one_d_level_range,
+             std::vector<std::pair<int, std::array<double, 3>>> const
+                 &lifting_offsets_and_coefficients,
+             ExecSpace instance = ExecSpace()) {
   using DElem = ddc::DiscreteElement<DDims...>;
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   auto [even_domain_functor, odd_domain_functor] =
@@ -34,14 +33,15 @@ constexpr bool transform_in(ChunkSpanType const strided_grid,
   for (long int current_1d_level : one_d_level_range) {
     assert(current_1d_level >= 0);
     current_level.template get<DDimInWhichToTransform>() = current_1d_level;
-    auto const operating_domain =
-        strided_domain_from_level(ddc::detail::array(current_level),
-                                  ddc::detail::array(maximum_level), lbound);
-    auto const virtual_length = ddc::DiscreteVector<DDimInWhichToTransform>(
-        operating_domain.extents().template get<DDimInWhichToTransform>() *
-        operating_domain.strides().template get<DDimInWhichToTransform>());
+    auto const operating_domain = strided_domain_from_level<DDims...>(
+        ddc::detail::array(current_level), ddc::detail::array(maximum_level));
     auto const current_stride =
         operating_domain.strides().template get<DDimInWhichToTransform>();
+    auto const virtual_length = ddc::DiscreteVector<DDimInWhichToTransform>(
+        operating_domain.extents().template get<DDimInWhichToTransform>() *
+        current_stride);
+    auto const this_d_stride =
+        ddc::DiscreteVector<DDimInWhichToTransform>(current_stride);
 
     for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
       // access chunk at every other point in transform dimension
@@ -58,8 +58,6 @@ constexpr bool transform_in(ChunkSpanType const strided_grid,
       ddc::parallel_for_each(
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // check for out of bounds, periodic if necessary
-            auto const this_d_stride =
-                ddc::DiscreteVector<DDimInWhichToTransform>(current_stride);
             DElem lower_element = ixyz - this_d_stride;
             DElem upper_element = ixyz + this_d_stride;
             if ((offset == 1) &&
@@ -72,12 +70,13 @@ constexpr bool transform_in(ChunkSpanType const strided_grid,
               upper_element -= virtual_length;
             } else if ((offset == 0) &&
                        (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) <=
-                        ddc::DiscreteElement<DDimInWhichToTransform>(lbound))) {
+                        ddc::select<DDimInWhichToTransform>(
+                            operating_domain.front()))) {
               // on the lower boundary, no -1 available
               lower_element += virtual_length;
             }
             strided_grid(ixyz) = filter[0] * strided_grid(lower_element) +
-                  filter[1] * strided_grid(ixyz) +
+                                 filter[1] * strided_grid(ixyz) +
                                  filter[2] * strided_grid(upper_element);
           });
     }
@@ -88,13 +87,13 @@ constexpr bool transform_in(ChunkSpanType const strided_grid,
 template <typename DDimInWhichToHierarchize, typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-constexpr bool hierarchize_in(ChunkSpanType const strided_grid,
-                    ddc::DiscreteVector<DDims...> const &level,
-                    ddc::DiscreteVector<DDims...> const &minimum_level,
-                    ddc::DiscreteVector<DDims...> const &maximum_level,
-                    ddc::DiscreteElement<DDims...> const &lbound,
-                    std::string const &wavelet_name = "hat",
-                    ExecSpace instance = ExecSpace()) {
+constexpr bool
+hierarchize_in(ChunkSpanType const strided_grid,
+               ddc::DiscreteVector<DDims...> const &level,
+               ddc::DiscreteVector<DDims...> const &minimum_level,
+               ddc::DiscreteVector<DDims...> const &maximum_level,
+               std::string const &wavelet_name = "hat",
+               ExecSpace instance = ExecSpace()) {
   auto const ddc_level_1d_vec = ddc::select<DDimInWhichToHierarchize>(level);
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
@@ -108,7 +107,7 @@ constexpr bool hierarchize_in(ChunkSpanType const strided_grid,
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
-      strided_grid, level, maximum_level, lbound, decreasing_range,
+      strided_grid, level, maximum_level, decreasing_range,
       lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
       instance);
 }
@@ -116,13 +115,13 @@ constexpr bool hierarchize_in(ChunkSpanType const strided_grid,
 template <typename DDimInWhichToHierarchize, typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-constexpr bool dehierarchize_in(ChunkSpanType const strided_grid,
-                      ddc::DiscreteVector<DDims...> const &level,
-                      ddc::DiscreteVector<DDims...> const &minimum_level,
-                      ddc::DiscreteVector<DDims...> const &maximum_level,
-                      ddc::DiscreteElement<DDims...> const &lbound,
-                      std::string const &wavelet_name = "hat",
-                      ExecSpace instance = ExecSpace()) {
+constexpr bool
+dehierarchize_in(ChunkSpanType const strided_grid,
+                 ddc::DiscreteVector<DDims...> const &level,
+                 ddc::DiscreteVector<DDims...> const &minimum_level,
+                 ddc::DiscreteVector<DDims...> const &maximum_level,
+                 std::string const &wavelet_name = "hat",
+                 ExecSpace instance = ExecSpace()) {
   auto const ddc_level_1d_vec = ddc::select<DDimInWhichToHierarchize>(level);
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
@@ -135,7 +134,7 @@ constexpr bool dehierarchize_in(ChunkSpanType const strided_grid,
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec + 1),
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
-      strided_grid, level, maximum_level, lbound, increasing_range,
+      strided_grid, level, maximum_level, increasing_range,
       lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
       instance);
 }
@@ -144,17 +143,16 @@ template <typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
 constexpr void hierarchize(ChunkSpanType const strided_grid,
-                 ddc::DiscreteVector<DDims...> const &level,
-                 ddc::DiscreteVector<DDims...> const &minimum_level,
-                 ddc::DiscreteVector<DDims...> const &maximum_level,
-                 ddc::DiscreteElement<DDims...> const &lbound,
-                 std::string const &wavelet_name = "hat",
-                 ExecSpace instance = ExecSpace()) {
+                           ddc::DiscreteVector<DDims...> const &level,
+                           ddc::DiscreteVector<DDims...> const &minimum_level,
+                           ddc::DiscreteVector<DDims...> const &maximum_level,
+                           std::string const &wavelet_name = "hat",
+                           ExecSpace instance = ExecSpace()) {
 
   // fold expression to call for every dimension
-  bool unused =
+  [[maybe_unused]] bool unused =
       (hierarchize_in<DDims>(strided_grid, level, minimum_level, maximum_level,
-                             lbound, wavelet_name, instance) &&
+                             wavelet_name, instance) &&
        ...);
 }
 
@@ -162,18 +160,17 @@ template <typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
 constexpr void dehierarchize(ChunkSpanType const strided_grid,
-                   ddc::DiscreteVector<DDims...> const &level,
-                   ddc::DiscreteVector<DDims...> const &minimum_level,
-                   ddc::DiscreteVector<DDims...> const &maximum_level,
-                   ddc::DiscreteElement<DDims...> const &lbound,
-                   std::string const &wavelet_name = "hat",
-                   ExecSpace instance = ExecSpace()) {
+                             ddc::DiscreteVector<DDims...> const &level,
+                             ddc::DiscreteVector<DDims...> const &minimum_level,
+                             ddc::DiscreteVector<DDims...> const &maximum_level,
+                             std::string const &wavelet_name = "hat",
+                             ExecSpace instance = ExecSpace()) {
 
   // fold expression to call for every dimension
-  bool unused =
+  [[maybe_unused]] bool unused =
       (dehierarchize_in<DDims>(strided_grid, level, minimum_level,
-                               maximum_level, lbound, wavelet_name, instance) &&
-                 ...);
+                               maximum_level, wavelet_name, instance) &&
+       ...);
 }
 
 template <typename SelectedDim, typename SDDom, typename DDom>
@@ -208,12 +205,12 @@ constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
         // TODO make all stencil values non-negative instead
       });
   if (is_for_hierarchization) {
-    dehierarchize_in<SelectedDim>(
-        full_pole, level, minimum_level, maximum_level, full_domain.front(),
-        wavelet_name, Kokkos::DefaultHostExecutionSpace());
+    dehierarchize_in<SelectedDim>(full_pole, level, minimum_level,
+                                  maximum_level, wavelet_name,
+                                  Kokkos::DefaultHostExecutionSpace());
   } else {
     hierarchize_in<SelectedDim>(full_pole, level, minimum_level, maximum_level,
-                                full_domain.front(), wavelet_name,
+                                wavelet_name,
                                 Kokkos::DefaultHostExecutionSpace());
   }
   // set to 0.0 on local_domain
@@ -227,10 +224,10 @@ constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
   size_t insert_index = 0;
   ddc::host_for_each(
       full_domain, [&required_elements, &full_pole, &insert_index](DElem ixyz) {
-                  if (full_pole(ixyz) != 0.0) {
-                    required_elements(insert_index++) = ixyz;
-                  }
-                });
+        if (full_pole(ixyz) != 0.0) {
+          required_elements(insert_index++) = ixyz;
+        }
+      });
   Kokkos::resize(required_elements, insert_index);
   return ddc::SparseDiscreteDomain<SelectedDim>(required_elements);
 }

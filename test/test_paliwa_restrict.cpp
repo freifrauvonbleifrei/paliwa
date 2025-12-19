@@ -15,7 +15,7 @@ TEST(domain, restrict_strided_domain_from_domain) {
   using SDDom = ddc::StridedDiscreteDomain<DDimX, DDimY>;
   using DElem = DDom::discrete_element_type;
   SDDom strided_dom_all = // indices 0, 2, ...14
-      paliwa::strided_domain_from_level({3, 3}, {4, 4}, DElem({}));
+      paliwa::strided_domain_from_level<DDimX, DDimY>({3, 3}, {4, 4});
   DDom local_dom =
       DDom(ddc::DiscreteDomain<DDimX>(ddc::DiscreteElement<DDimX>(1),
                                       ddc::DiscreteVector<DDimX>(5)),

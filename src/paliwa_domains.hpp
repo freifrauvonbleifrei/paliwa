@@ -10,21 +10,18 @@ template <typename... DDims>
 constexpr ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
     std::array<long int, sizeof...(DDims)> const &finest_level,
-    ddc::DiscreteElement<DDims...> lbound) {
+    ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   constexpr size_t dimensionality = sizeof...(DDims);
-  std::array<long int, dimensionality> resolution;
+  std::array<long int, dimensionality> resolution, level_diff, stride;
   std::ranges::transform(level, resolution.begin(),
                          [](long int l) { return (1 << l); });
-  ddc::DiscreteVector<DDims...> resolution_all(resolution);
-  std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
-  std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
                          [](long int l) { return (1 << l); });
   ddc::DiscreteVector<DDims...> strides_all(stride);
-  return ddc::StridedDiscreteDomain<DDims...>(lbound, resolution_all,
-                                              strides_all);
+  return ddc::StridedDiscreteDomain<DDims...>(
+      lbound, ddc::DiscreteVector<DDims...>(resolution), strides_all);
 }
 
 template <typename... DDims>
@@ -32,15 +29,13 @@ constexpr ddc::StridedDiscreteDomain<DDims...>
 strided_hierarchical_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
     std::array<long int, sizeof...(DDims)> const &finest_level,
-    ddc::DiscreteElement<DDims...> lbound) {
+    ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   constexpr size_t dimensionality = sizeof...(DDims);
-  std::array<long int, dimensionality> resolution;
+  std::array<long int, dimensionality> resolution, level_diff, half_stride;
   std::ranges::transform(level, resolution.begin(),
                          [](long int ml) { return (1 << (ml - 1)); });
-  std::array<long int, dimensionality> level_diff;
   std::ranges::transform(level, finest_level, level_diff.begin(),
                          [](long int l, long int ml) { return ml - l; });
-  std::array<long int, dimensionality> half_stride;
   std::ranges::transform(level_diff, half_stride.begin(),
                          [](long int l) { return (1 << l); });
   // special case level 0
@@ -66,7 +61,7 @@ strided_hierarchical_domain_from_level(
 template <typename DDimInWhichItsOdd, typename... DDims>
 constexpr ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
     ddc::StridedDiscreteDomain<DDims...> const &domain,
-    ddc::DiscreteElement<DDims...> lbound) {
+    ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   ddc::DiscreteVector<DDimInWhichItsOdd> odd_offset(
       domain.strides().template get<DDimInWhichItsOdd>());
   ddc::DiscreteVector<DDims...> strides_odd = domain.strides();
@@ -81,7 +76,7 @@ constexpr ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
 template <typename DDimInWhichItsEven, typename... DDims>
 constexpr ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
     ddc::StridedDiscreteDomain<DDims...> const &domain,
-    ddc::DiscreteElement<DDims...> lbound) {
+    ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   ddc::DiscreteVector<DDims...> strides_even = domain.strides();
   strides_even.template get<DDimInWhichItsEven>() *= 2;
   auto extent_even = domain.extents();
@@ -95,7 +90,7 @@ template <typename... DDims>
 constexpr std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
     std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
     std::array<long int, sizeof...(DDims)> maximum_level,
-    ddc::DiscreteElement<DDims...> lbound) {
+    ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   std::vector<ddc::StridedDiscreteDomain<DDims...>> component_grid_domains;
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     auto &level = all_levels[grid_index];
