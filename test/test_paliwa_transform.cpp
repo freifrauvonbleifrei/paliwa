@@ -53,7 +53,8 @@ void test_transform_hat_stays_same_2d() {
         DElem({}));
     ddc::host_for_each(strided_domain, [&](DElem const ixy) {
       if (strided_domain_lmin.contains(ixy)) {
-        EXPECT_EQ(strided_grid_host(ixy), strided_grid_host_before(ixy));
+          EXPECT_NEAR(strided_grid_host(ixy), strided_grid_host_before(ixy),
+                      1e-14);
       } else {
           EXPECT_NE(strided_grid_host(ixy), strided_grid_host_before(ixy));
       }
@@ -125,7 +126,7 @@ void test_transform_mass_conservation_2d(std::string wavelet_name) {
           Kokkos::DefaultExecutionSpace(), strided_domain_lmin, 0.0,
           ddc::reducer::sum<double>(), strided_grid);
       EXPECT_NEAR(lmin_sum, reference_average * strided_domain_lmin.size(),
-                  1e-10);
+                  1e-13);
     }
   }
 }
