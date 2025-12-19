@@ -10,7 +10,7 @@ struct Y {};
 struct DDimX : ddc::UniformPointSampling<X> {};
 struct DDimY : ddc::UniformPointSampling<Y> {};
 
-TEST(restrict_strided_domain_from_domain, domain) {
+TEST(domain, restrict_strided_domain_from_domain) {
   using DDom = ddc::DiscreteDomain<DDimX, DDimY>;
   using SDDom = ddc::StridedDiscreteDomain<DDimX, DDimY>;
   using DElem = DDom::discrete_element_type;
