@@ -42,8 +42,10 @@ bool transform_in(DDomainType const &strided_domain,
     assert((1 << (ddc_max_level_1d_vec - ddc_level_1d_vec)) ==
            strided_domain.strides().template get<DDimInWhichToTransform>());
   }
-  ddc::DiscreteVector<DDims...> current_level(level);
+  auto [even_domain_functor, odd_domain_functor] =
+      get_even_and_odd_half_domain_functors<DDimInWhichToTransform, DDims...>();
 
+  ddc::DiscreteVector<DDims...> current_level(level);
   for (long int current_1d_level : one_d_level_range) {
     assert(current_1d_level >= 0);
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
@@ -60,13 +62,9 @@ bool transform_in(DDomainType const &strided_domain,
       // access chunk at every other point in transform dimension
       std::function<SDDom(SDDom const &)> coarsen_domain;
       if (offset == 0) {
-        coarsen_domain = std::bind(
-            even_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
-            std::placeholders::_1, lbound);
+        coarsen_domain = even_domain_functor;
       } else if (offset == 1) {
-        coarsen_domain = std::bind(
-            odd_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
-            std::placeholders::_1, lbound);
+        coarsen_domain = odd_domain_functor;
       } else {
         throw std::runtime_error("Filter offset not supported");
       }

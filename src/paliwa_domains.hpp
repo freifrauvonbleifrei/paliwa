@@ -107,6 +107,17 @@ std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
   return component_grid_domains;
 }
 
+template <typename DDimInWhichToTransform, typename... DDims>
+constexpr decltype(auto) get_even_and_odd_half_domain_functors() {
+  return std::make_pair(
+      std::bind(
+          even_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
+          std::placeholders::_1, ddc::DiscreteElement<DDims...>({})),
+      std::bind(
+          odd_strided_domain_from_domain<DDimInWhichToTransform, DDims...>,
+          std::placeholders::_1, ddc::DiscreteElement<DDims...>({})));
+}
+
 template <typename OtherElementType, typename HeadTag, typename... Tags>
 static ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
     ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
