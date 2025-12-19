@@ -114,10 +114,13 @@ bool hierarchize_in(DDomainType const &strided_domain,
                     ddc::DiscreteElement<DDims...> const &lbound,
                     std::string const &wavelet_name = "hat",
                     ExecSpace instance = ExecSpace()) {
-
   auto const ddc_level_1d_vec = ddc::select<DDimInWhichToHierarchize>(level);
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
+  assert(ddc_level_1d_vec >= ddc_min_level_1d_vec);
+  assert(ddc_min_level_1d_vec > 0);
+  assert(ddc_level_1d_vec <=
+         ddc::select<DDimInWhichToHierarchize>(maximum_level));
 
   auto decreasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec + 1),
@@ -142,10 +145,13 @@ bool dehierarchize_in(DDomainType const &strided_domain,
                       ddc::DiscreteElement<DDims...> const &lbound,
                       std::string const &wavelet_name = "hat",
                       ExecSpace instance = ExecSpace()) {
-
   auto const ddc_level_1d_vec = ddc::select<DDimInWhichToHierarchize>(level);
   auto const ddc_min_level_1d_vec =
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
+  assert(ddc_level_1d_vec >= ddc_min_level_1d_vec);
+  assert(ddc_min_level_1d_vec > 0);
+  assert(ddc_level_1d_vec <=
+         ddc::select<DDimInWhichToHierarchize>(maximum_level));
 
   auto increasing_range =
       std::views::iota(static_cast<long int>(ddc_min_level_1d_vec + 1),
