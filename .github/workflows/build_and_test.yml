@@ -45,7 +45,12 @@ jobs:
         spack env activate ddc-env
         mkdir build
         ls -l
-        cmake -DCMAKE_BUILD_TYPE=Debug -B build
+        cmake -DCMAKE_BUILD_TYPE=Debug -DPALIWA_BUILD_TESTS=ON -B build
         cd build
         make -j
-        
+    - name: Run tests
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        cd build
+        ./test/paliwa_tests        
