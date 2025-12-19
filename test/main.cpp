@@ -11,6 +11,6 @@ int main(int argc, char **argv) {
     paliwa::MPIOptionalGuard const mpi_guard(argc, argv);
     Kokkos::ScopeGuard const kokkos_scope(argc, argv);
     ddc::ScopeGuard const ddc_scope(argc, argv);
-    RUN_ALL_TESTS();
+    return RUN_ALL_TESTS();
   }
 }

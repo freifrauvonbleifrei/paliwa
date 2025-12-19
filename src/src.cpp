@@ -6,6 +6,10 @@
 #include <iostream>
 #include <vector>
 
+#ifdef PALIWA_WITH_MPI
+#include <mpi.h>
+#endif // PALIWA_WITH_MPI
+
 #include <ddc/ddc.hpp>
 
 #include "Kokkos_UnorderedMap.hpp"

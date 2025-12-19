@@ -45,6 +45,7 @@ bool transform_in(DDomainType const &strided_domain,
   ddc::DiscreteVector<DDims...> current_level(level);
 
   for (long int current_1d_level : one_d_level_range) {
+    assert(current_1d_level >= 0);
     int const current_stride = (1 << (ddc_max_level_1d_vec - current_1d_level));
     current_level.template get<DDimInWhichToTransform>() = current_1d_level;
     auto const operating_domain =
@@ -76,6 +77,8 @@ bool transform_in(DDomainType const &strided_domain,
             // check for out of bounds, periodic if necessary
             auto const this_d_stride =
                 ddc::DiscreteVector<DDimInWhichToTransform>(current_stride);
+            DElem lower_element = ixyz - this_d_stride;
+            DElem upper_element = ixyz + this_d_stride;
             if ((offset == 1) &&
                 (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
                      this_d_stride >
@@ -83,26 +86,16 @@ bool transform_in(DDomainType const &strided_domain,
                      write_to_domain.back()))) {
               // on the upper boundary, no +1 available
               // TODO make separate step to avoid branch here?
-              strided_grid(ixyz) =
-                  filter[0] * strided_grid(ixyz - this_d_stride) +
-                  filter[1] * strided_grid(ixyz) +
-                  filter[2] *
-                      strided_grid(ixyz + this_d_stride - virtual_length);
+              upper_element -= virtual_length;
             } else if ((offset == 0) &&
                        (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) <=
                         ddc::DiscreteElement<DDimInWhichToTransform>(lbound))) {
               // on the lower boundary, no -1 available
-              strided_grid(ixyz) =
-                  filter[0] *
-                      strided_grid(ixyz - this_d_stride + virtual_length) +
-                  filter[1] * strided_grid(ixyz) +
-                  filter[2] * strided_grid(ixyz + this_d_stride);
-            } else {
-              strided_grid(ixyz) =
-                  filter[0] * strided_grid(ixyz - this_d_stride) +
-                  filter[1] * strided_grid(ixyz) +
-                  filter[2] * strided_grid(ixyz + this_d_stride);
+              lower_element += virtual_length;
             }
+            strided_grid(ixyz) = filter[0] * strided_grid(lower_element) +
+                  filter[1] * strided_grid(ixyz) +
+                                 filter[2] * strided_grid(upper_element);
           });
     }
   }
@@ -127,7 +120,7 @@ bool hierarchize_in(DDomainType const &strided_domain,
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
 
   auto decreasing_range =
-      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
+      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec + 1),
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
@@ -155,7 +148,7 @@ bool dehierarchize_in(DDomainType const &strided_domain,
       ddc::select<DDimInWhichToHierarchize>(minimum_level);
 
   auto increasing_range =
-      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec) - 1,
+      std::views::iota(static_cast<long int>(ddc_min_level_1d_vec + 1),
                        static_cast<long int>(ddc_level_1d_vec) + 1);
   return transform_in<DDimInWhichToHierarchize>(
       strided_domain, strided_grid, level, maximum_level, lbound,
@@ -251,8 +244,8 @@ ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
   Kokkos::View<DElem *, Kokkos::SharedSpace> required_elements(
       "required_elements", full_domain.size());
   size_t insert_index = 0;
-  ddc::for_each(full_domain,
-                [&required_elements, &full_pole, &insert_index](DElem ixyz) {
+  ddc::host_for_each(
+      full_domain, [&required_elements, &full_pole, &insert_index](DElem ixyz) {
                   if (full_pole(ixyz) != 0.0) {
                     required_elements(insert_index++) = ixyz;
                   }
