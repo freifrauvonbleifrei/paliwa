@@ -7,7 +7,7 @@
 namespace paliwa {
 
 template <typename... DDims>
-ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
+constexpr ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
     std::array<long int, sizeof...(DDims)> const &finest_level,
     ddc::DiscreteElement<DDims...> lbound) {
@@ -28,7 +28,8 @@ ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
 }
 
 template <typename... DDims>
-ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
+constexpr ddc::StridedDiscreteDomain<DDims...>
+strided_hierarchical_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
     std::array<long int, sizeof...(DDims)> const &finest_level,
     ddc::DiscreteElement<DDims...> lbound) {
@@ -63,7 +64,7 @@ ddc::StridedDiscreteDomain<DDims...> strided_hierarchical_domain_from_level(
 }
 
 template <typename DDimInWhichItsOdd, typename... DDims>
-ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
+constexpr ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
     ddc::StridedDiscreteDomain<DDims...> const &domain,
     ddc::DiscreteElement<DDims...> lbound) {
   ddc::DiscreteVector<DDimInWhichItsOdd> odd_offset(
@@ -78,7 +79,7 @@ ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
 }
 
 template <typename DDimInWhichItsEven, typename... DDims>
-ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
+constexpr ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
     ddc::StridedDiscreteDomain<DDims...> const &domain,
     ddc::DiscreteElement<DDims...> lbound) {
   ddc::DiscreteVector<DDims...> strides_even = domain.strides();
@@ -91,7 +92,7 @@ ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
 }
 
 template <typename... DDims>
-std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
+constexpr std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
     std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
     std::array<long int, sizeof...(DDims)> maximum_level,
     ddc::DiscreteElement<DDims...> lbound) {
@@ -119,7 +120,7 @@ constexpr decltype(auto) get_even_and_odd_half_domain_functors() {
 }
 
 template <typename OtherElementType, typename HeadTag, typename... Tags>
-static ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
+constexpr ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
     ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
     ddc::DiscreteVector<HeadTag, Tags...> const &strides,
     OtherElementType const &other_begin) {

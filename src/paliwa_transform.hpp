@@ -17,7 +17,7 @@ template <typename DDimInWhichToTransform,
           typename LevelRange,    // TODO input_range concept
           typename ExecSpace,     // todo = Kokkos::DefaultExecutionSpace,
           typename... DDims>
-bool transform_in(ChunkSpanType const strided_grid,
+constexpr bool transform_in(ChunkSpanType const strided_grid,
                   ddc::DiscreteVector<DDims...> const &level,
                   ddc::DiscreteVector<DDims...> const &maximum_level,
                   ddc::DiscreteElement<DDims...> const &lbound,
@@ -88,7 +88,7 @@ bool transform_in(ChunkSpanType const strided_grid,
 template <typename DDimInWhichToHierarchize, typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-bool hierarchize_in(ChunkSpanType const strided_grid,
+constexpr bool hierarchize_in(ChunkSpanType const strided_grid,
                     ddc::DiscreteVector<DDims...> const &level,
                     ddc::DiscreteVector<DDims...> const &minimum_level,
                     ddc::DiscreteVector<DDims...> const &maximum_level,
@@ -116,7 +116,7 @@ bool hierarchize_in(ChunkSpanType const strided_grid,
 template <typename DDimInWhichToHierarchize, typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-bool dehierarchize_in(ChunkSpanType const strided_grid,
+constexpr bool dehierarchize_in(ChunkSpanType const strided_grid,
                       ddc::DiscreteVector<DDims...> const &level,
                       ddc::DiscreteVector<DDims...> const &minimum_level,
                       ddc::DiscreteVector<DDims...> const &maximum_level,
@@ -143,7 +143,7 @@ bool dehierarchize_in(ChunkSpanType const strided_grid,
 template <typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-void hierarchize(ChunkSpanType const strided_grid,
+constexpr void hierarchize(ChunkSpanType const strided_grid,
                  ddc::DiscreteVector<DDims...> const &level,
                  ddc::DiscreteVector<DDims...> const &minimum_level,
                  ddc::DiscreteVector<DDims...> const &maximum_level,
@@ -161,7 +161,7 @@ void hierarchize(ChunkSpanType const strided_grid,
 template <typename ChunkSpanType,
           typename ExecSpace, // = Kokkos::DefaultExecutionSpace
           typename... DDims>
-void dehierarchize(ChunkSpanType const strided_grid,
+constexpr void dehierarchize(ChunkSpanType const strided_grid,
                    ddc::DiscreteVector<DDims...> const &level,
                    ddc::DiscreteVector<DDims...> const &minimum_level,
                    ddc::DiscreteVector<DDims...> const &maximum_level,
@@ -177,7 +177,7 @@ void dehierarchize(ChunkSpanType const strided_grid,
 }
 
 template <typename SelectedDim, typename SDDom, typename DDom>
-ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
+constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
     bool is_for_hierarchization, SDDom const &full_domain,
     DDom const &local_domain, ddc::DiscreteVector<SelectedDim> const &level,
     ddc::DiscreteVector<SelectedDim> const &minimum_level,
@@ -209,12 +209,12 @@ ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
       });
   if (is_for_hierarchization) {
     dehierarchize_in<SelectedDim>(
-        full_domain, full_pole, level, minimum_level, maximum_level,
-        full_domain.front(), wavelet_name, Kokkos::DefaultHostExecutionSpace());
+        full_pole, level, minimum_level, maximum_level, full_domain.front(),
+        wavelet_name, Kokkos::DefaultHostExecutionSpace());
   } else {
-    hierarchize_in<SelectedDim>(
-        full_domain, full_pole, level, minimum_level, maximum_level,
-        full_domain.front(), wavelet_name, Kokkos::DefaultHostExecutionSpace());
+    hierarchize_in<SelectedDim>(full_pole, level, minimum_level, maximum_level,
+                                full_domain.front(), wavelet_name,
+                                Kokkos::DefaultHostExecutionSpace());
   }
   // set to 0.0 on local_domain
   ddc::parallel_for_each(
@@ -236,7 +236,7 @@ ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
 }
 
 template <typename DDom, typename HeadTag, typename... DDims>
-ddc::SparseDiscreteDomain<HeadTag, DDims...>
+constexpr ddc::SparseDiscreteDomain<HeadTag, DDims...>
 get_required_transform_domains_recursive(
     bool is_for_hierarchization,
     ddc::StridedDiscreteDomain<HeadTag, DDims...> const &full_domain,
@@ -264,7 +264,7 @@ get_required_transform_domains_recursive(
 }
 
 template <typename DDom, typename... DDims>
-ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
+constexpr ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
     bool is_for_hierarchization,
     ddc::StridedDiscreteDomain<DDims...> const &full_domain,
     DDom const &local_domain, ddc::DiscreteVector<DDims...> const &level,

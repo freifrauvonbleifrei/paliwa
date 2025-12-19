@@ -29,7 +29,7 @@ struct MPIOptionalGuard {
 };
 
 template <class HeadTag, class... Tags>
-static ddc::DiscreteDomain<HeadTag, Tags...>
+constexpr ddc::DiscreteDomain<HeadTag, Tags...>
 distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
                      ddc::DiscreteVector<HeadTag, Tags...> const &par_vector,
                      ddc::DiscreteVector<HeadTag, Tags...> const &my_coords) {
@@ -68,7 +68,7 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
 
 #ifdef PALIWA_WITH_MPI
 template <typename DiscreteDomainType>
-std::pair<DiscreteDomainType, MPI_Comm> decompose_domain_on_communicator(
+constexpr std::pair<DiscreteDomainType, MPI_Comm> decompose_domain_on_communicator(
     DiscreteDomainType const &global_domain, MPI_Comm comm,
     std::array<int, DiscreteDomainType::rank()> const &par_vector) {
   static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,

@@ -8,7 +8,7 @@
 namespace paliwa {
 
 template <typename ChunkType>
-void dump_chunk_span_to_binary_file(ChunkType const span,
+constexpr void dump_chunk_span_to_binary_file(ChunkType const span,
                                     std::string const &filename) {
   auto host_mirror_view =
       ddc::create_mirror_view_and_copy(Kokkos::SharedHostPinnedSpace(), span);
