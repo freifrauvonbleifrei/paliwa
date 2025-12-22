@@ -1,7 +1,12 @@
+// SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+//
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
+// Some parts reused from ddc/tests/strided_discrete_domain.cpp
+// for these parts:
+// Copyright (C) The DDC development team, see DDC's COPYRIGHT.md file
+
 // SPDX-License-Identifier: MIT
-// A lot reused from ddc/tests/strided_discrete_domain.cpp
-// for these parts: Copyright (C) The DDC development team,
-// see DDC's COPYRIGHT.md file
 
 #include <iostream>
 #include <vector>

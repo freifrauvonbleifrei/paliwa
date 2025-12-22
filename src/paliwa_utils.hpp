@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+//
+// SPDX-License-Identifier: LGPL-2.1-or-later
+
 #pragma once
 
 namespace paliwa {

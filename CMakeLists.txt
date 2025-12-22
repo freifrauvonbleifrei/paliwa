@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+#
+# SPDX-License-Identifier: LGPL-2.1-or-later
+
 cmake_minimum_required(VERSION 3.25)
 
 # paliwa : parallel lifting wavelets
