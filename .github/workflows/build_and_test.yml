@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
     # cf. https://github.com/spack/setup-spack
     - name: Set up Spack
-      uses: spack/setup-spack@v2
+      uses: spack/setup-spack@5ab3c91bdefffffad9a7e45d1d156146afebb3a7
       with:
         ref: develop      # Spack version (examples: develop, releases/v0.23)
         buildcache: true  # Configure oci://ghcr.io/spack/github-actions-buildcache
