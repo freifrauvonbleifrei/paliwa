@@ -13,7 +13,12 @@ on:
   
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    name: build-and-test (MPI: ${{ matrix.mpi }}, ${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mpi:         [yes, no]
+        build_type:  [Release, Debug]
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
     # cf. https://github.com/spack/setup-spack
@@ -38,7 +43,9 @@ jobs:
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft #...+cuda cuda_arch=...
         spack --env ddc-env add googletest
-        spack --env ddc-env add mpi
+        if [ "${{ matrix.mpi }}" == "yes" ]; then
+          spack --env ddc-env add mpi
+        fi
         spack --env ddc-env add py-pip
         spack --env ddc-env install
         spack env activate ddc-env
@@ -49,9 +56,12 @@ jobs:
         spack env activate ddc-env
         mkdir build
         ls -l
-        cmake -DCMAKE_BUILD_TYPE=Debug -DPALIWA_BUILD_TESTS=ON -B build
-        cd build
-        make -j
+        if [ "${{ matrix.mpi }}" == "yes" ]; then
+          cmake -DPALIWA_BUILD_TESTS=ON -DPALIWA_WITH_MPI=ON -B build
+        else
+          cmake -DPALIWA_BUILD_TESTS=ON -DPALIWA_WITH_MPI=OFF -B build
+        fi
+        cmake --build ./build/ --config ${{ matrix.build_type }}
     - name: Run tests
       shell: spack-bash {0}
       run: |
