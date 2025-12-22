@@ -2,6 +2,12 @@
 #
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
+# Some parts reused from ddc/CMakeLists.txt
+# for these parts:
+# Copyright (C) The DDC development team, see DDC's COPYRIGHT.md file
+
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.25)
 
 # paliwa : parallel lifting wavelets

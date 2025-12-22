@@ -2,6 +2,12 @@
 //
 // SPDX-License-Identifier: LGPL-2.1-or-later
 
+// Some parts reused from ddc/tests/main.cpp
+// for these parts:
+// Copyright (C) The DDC development team, see DDC's COPYRIGHT.md file
+//
+// SPDX-License-Identifier: MIT
+
 #include <Kokkos_Core.hpp>
 #include <ddc/ddc.hpp>
 #include <gtest/gtest.h>
