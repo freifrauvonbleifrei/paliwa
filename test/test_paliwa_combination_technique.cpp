@@ -337,11 +337,12 @@ void run_combination_technique(
   std::string const filename = "full_grid_" + max_level_str + ".raw";
   paliwa::dump_chunk_span_to_binary_file(full_grid_view, filename);
   std::cout << "Wrote full grid to " << filename << std::endl;
-  double const mean_value = ddc::parallel_transform_reduce(
-                                dom_all, static_cast<double>(0.),
-                                ddc::reducer::sum<double>(), full_grid_view) /
-                            dom_all.size();
-  std::cout << "Mean value on finest grid: " << mean_value << std::endl;
+  double const reduced_value = ddc::parallel_transform_reduce(
+      dom_all, static_cast<double>(0.), ddc::reducer::sum<double>(),
+      full_grid_view);
+  double const mean_value = reduced_value / dom_all.size();
+  std::cout << "Mean value on finest grid: " << mean_value << " (from "
+            << reduced_value << " total)" << std::endl;
   EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.031);
 }
 
