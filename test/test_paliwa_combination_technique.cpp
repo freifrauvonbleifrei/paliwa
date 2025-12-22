@@ -127,6 +127,8 @@ void run_combination_technique(
                   {1, 2, 3, 6}, {1, 2, 4, 5}, {1, 2, 4, 4}, {2, 2, 3, 4},
                   {1, 3, 3, 4}, {1, 2, 3, 5}, {1, 2, 3, 4}};
     all_combi_coefficients = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -3, -3, -3, -3, 3};
+  } else {
+    static_assert(dimensionality < 5, "Dimensionality not yet supported");
   }
   DVect const ddc_minimum_level(minimum_level);
   DVect const ddc_maximum_level(maximum_level);
@@ -137,6 +139,17 @@ void run_combination_technique(
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data = initialize_combination_scheme(component_grid_domains,
                                                  all_levels, instances);
+  size_t accumulated_full_grid_size = 0;
+  for (const auto &domain : component_grid_domains) {
+    accumulated_full_grid_size += domain.size();
+  }
+  if constexpr (dimensionality == 2) {
+    EXPECT_EQ(accumulated_full_grid_size, 106496);
+  } else if constexpr (dimensionality == 3) {
+    EXPECT_EQ(accumulated_full_grid_size, 425984);
+  } else if constexpr (dimensionality == 4) {
+    EXPECT_EQ(accumulated_full_grid_size, 50176);
+  }
   paliwa::fence_all_instances(instances);
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
@@ -202,7 +215,7 @@ void run_combination_technique(
                        Kokkos::SharedHostPinnedSpace>
       subspaces_domains_and_data_pointers_host(subspace_count.size());
 
-  size_t accumulated_size = 0;
+  size_t accumulated_sparse_grid_size = 0;
   size_t used_subspace_number = 0;
   for (const auto &subspace_level_and_count : subspace_count) {
     auto const &subspace_level = subspace_level_and_count.first;
@@ -211,21 +224,24 @@ void run_combination_technique(
       auto subspace_domain =
           paliwa::strided_hierarchical_domain_from_level<DDims...>(
               subspace_level, maximum_level);
-      accumulated_size += subspace_domain.size();
+      accumulated_sparse_grid_size += subspace_domain.size();
       subspaces_levels_host.insert(used_subspace_number, subspace_level);
       subspaces_domains_and_data_pointers_host.insert(
           used_subspace_number++,
           std::make_pair(std::move(subspace_domain), nullptr));
     }
   }
-  std::cout << "Total size of all subspaces: " << accumulated_size << std::endl;
   if constexpr (dimensionality == 2) {
-    EXPECT_EQ(accumulated_size, 18432);
+    EXPECT_EQ(accumulated_sparse_grid_size, 18432);
+  } else if constexpr (dimensionality == 3) {
+    EXPECT_EQ(accumulated_sparse_grid_size, 131072);
+  } else if constexpr (dimensionality == 4) {
+    EXPECT_EQ(accumulated_sparse_grid_size, 5120);
   }
 
   // allocate once
   Kokkos::View<double *> all_subspace_data("all_subspace_data",
-                                           accumulated_size);
+                                           accumulated_sparse_grid_size);
 
   size_t current_data_pointer_index = 0;
   for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
