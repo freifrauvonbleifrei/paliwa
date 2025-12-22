@@ -11,8 +11,8 @@ SPDX-License-Identifier: MIT
 The paliwa project follows the
 [REUSE specification](https://reuse.software/spec-3.3/).
 
-It is distributed under the LGPL (version 2.1 or later) whose full
-text is available in the LICENSE file.
+It is distributed under the LGPL (version 2.1 or later) whose
+full text is available in the LICENSES folder.
 A small number of files in this repository may feature
 code that does not originate from the paliwa developers.
 These files may have their own licences which will be
