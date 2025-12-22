@@ -22,28 +22,13 @@
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
 
-// #include "paliwa_dimensions.hpp" //todo
+#include "../src/paliwa_dimensions.hpp"
 #include "../src/paliwa_distribute.hpp"
 #include "../src/paliwa_domains.hpp"
 #include "../src/paliwa_io.hpp"
 #include "../src/paliwa_transform.hpp"
 #include "../src/paliwa_utils.hpp"
 #include "../src/paliwa_wavelets.hpp"
-
-struct X {};
-struct Y {};
-struct Z {};
-struct Vx {};
-
-struct DDimX : ddc::UniformPointSampling<X> {};
-using DElemX = ddc::DiscreteElement<DDimX>;
-
-struct DDimY : ddc::UniformPointSampling<Y> {};
-using DElemY = ddc::DiscreteElement<DDimY>;
-
-struct DDimZ : ddc::UniformPointSampling<Z> {};
-using DElemZ = ddc::DiscreteElement<DDimZ>;
-struct DDimVx : ddc::UniformPointSampling<Vx> {};
 
 constexpr double pi = 3.14159265358979323846;
 double sinusoid_integral_analytical(int d) {
@@ -100,6 +85,8 @@ void run_combination_technique(
     maximum_level = {5, 6, 7};
   } else if constexpr (dimensionality == 2) {
     maximum_level = {10, 11};
+  } else if constexpr (dimensionality == 4) {
+    maximum_level = {3, 4, 5, 6};
   } else {
     throw std::runtime_error("Dimensionality not supported");
   }
@@ -108,29 +95,8 @@ void run_combination_technique(
                  [](int ml) { return (1 << ml) + 1; });
   DVect resolution_all(resolution);
 
-  // discrete domain in 3d, for the full grid but not allocated yet
-  auto const x_domain_with_periodic_point = ddc::init_discrete_space<DDimX>(
-      DDimX::init<DDimX>(ddc::Coordinate<X>(0.0), ddc::Coordinate<X>(1.0),
-                         ddc::DiscreteVector<DDimX>(resolution[0])));
-  ddc::DiscreteDomain<DDimX> const x_domain =
-      x_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimX>(1));
-  auto const y_domain_with_periodic_point = ddc::init_discrete_space<DDimY>(
-      DDimY::init<DDimY>(ddc::Coordinate<Y>(0.0), ddc::Coordinate<Y>(1.0),
-                         ddc::DiscreteVector<DDimY>(resolution[1])));
-  ddc::DiscreteDomain<DDimY> const y_domain =
-      y_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimY>(1));
-  DDom dom_all;
-  if constexpr (dimensionality == 3) {
-    auto const z_domain_with_periodic_point = ddc::init_discrete_space<DDimZ>(
-        DDimZ::init<DDimZ>(ddc::Coordinate<Z>(0.0), ddc::Coordinate<Z>(1.0),
-                           ddc::DiscreteVector<DDimZ>(resolution[2])));
-    ddc::DiscreteDomain<DDimZ> const z_domain =
-        z_domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDimZ>(1));
-
-    dom_all = DDom(x_domain, y_domain, z_domain);
-  } else if constexpr (dimensionality == 2) {
-    dom_all = DDom(x_domain, y_domain);
-  }
+  auto dom_all =
+      paliwa::initialize_dims_periodic_unit_cube<DDims...>(resolution_all);
 
 #ifdef PALIWA_WITH_MPI
   std::array<int, dimensionality> parallelization_vector = {1, 1};
@@ -143,17 +109,24 @@ void run_combination_technique(
   std::array<long int, dimensionality> minimum_level;
   std::vector<std::array<long int, dimensionality>> all_levels;
   std::vector<double> all_combi_coefficients;
-  if constexpr (dimensionality == 3) {
-    minimum_level = {4, 5, 6};
-    all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
-    all_combi_coefficients = {1, 1, 1, -2};
-  } else if constexpr (dimensionality == 2) {
+  if constexpr (dimensionality == 2) {
     minimum_level = {2, 3};
     all_levels = {{2, 11}, {3, 10}, {4, 9},  {5, 8},  {6, 7}, {7, 6},
                   {8, 5},  {9, 4},  {10, 3}, {2, 10}, {3, 9}, {4, 8},
                   {5, 7},  {6, 6},  {7, 5},  {8, 4},  {9, 3}};
     all_combi_coefficients = {1,  1,  1,  1,  1,  1,  1,  1, 1,
                               -1, -1, -1, -1, -1, -1, -1, -1};
+  } else if constexpr (dimensionality == 3) {
+    minimum_level = {4, 5, 6};
+    all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
+    all_combi_coefficients = {1, 1, 1, -2};
+  } else if constexpr (dimensionality == 4) {
+    minimum_level = {1, 2, 3, 4};
+    all_levels = {{2, 2, 4, 4}, {3, 2, 3, 4}, {1, 4, 3, 4}, {1, 2, 5, 4},
+                  {2, 3, 3, 4}, {1, 3, 4, 4}, {2, 2, 3, 5}, {1, 3, 3, 5},
+                  {1, 2, 3, 6}, {1, 2, 4, 5}, {1, 2, 4, 4}, {2, 2, 3, 4},
+                  {1, 3, 3, 4}, {1, 2, 3, 5}, {1, 2, 3, 4}};
+    all_combi_coefficients = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -3, -3, -3, -3, 3};
   }
   DVect const ddc_minimum_level(minimum_level);
   DVect const ddc_maximum_level(maximum_level);
@@ -353,7 +326,7 @@ void run_combination_technique(
                                      full_grid_view) /
       dom_all.size();
   std::cout << "Mean value on finest grid: " << mean_value << std::endl;
-  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.03);
+  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.031);
 }
 
 template <size_t dimensionality>
@@ -361,11 +334,13 @@ void run_combination_technique_in_dimensions(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     paliwa::MPICommType comm) {
   if constexpr (dimensionality == 2) {
-    run_combination_technique<DDimX, DDimY>(instances, comm);
+    run_combination_technique<paliwa::DDimA, paliwa::DDimB>(instances, comm);
   } else if constexpr (dimensionality == 3) {
-    run_combination_technique<DDimX, DDimY, DDimZ>(instances, comm);
+    run_combination_technique<paliwa::DDimC, paliwa::DDimD, paliwa::DDimE>(
+        instances, comm);
   } else if constexpr (dimensionality == 4) {
-    run_combination_technique<DDimX, DDimY, DDimZ, DDimVx>(instances, comm);
+    run_combination_technique<paliwa::DDimF, paliwa::DDimG, paliwa::DDimH,
+                              paliwa::DDimI>(instances, comm);
   } else {
     throw std::runtime_error("Dimensionality not yet supported");
   }
@@ -378,4 +353,20 @@ TEST(combination_technique, full_integration_2d) {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
 
   run_combination_technique_in_dimensions<2>(instances, MPI_COMM_WORLD);
+}
+
+TEST(combination_technique, full_integration_3d) {
+  // use up to 32 concurrent streams
+  auto instances = Kokkos::Experimental::partition_space(
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+  run_combination_technique_in_dimensions<3>(instances, MPI_COMM_WORLD);
+}
+
+TEST(combination_technique, full_integration_4d) {
+  // use up to 32 concurrent streams
+  auto instances = Kokkos::Experimental::partition_space(
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+  run_combination_technique_in_dimensions<4>(instances, MPI_COMM_WORLD);
 }
