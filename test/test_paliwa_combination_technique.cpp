@@ -45,6 +45,12 @@ struct DDimZ : ddc::UniformPointSampling<Z> {};
 using DElemZ = ddc::DiscreteElement<DDimZ>;
 struct DDimVx : ddc::UniformPointSampling<Vx> {};
 
+constexpr double pi = 3.14159265358979323846;
+double sinusoid_integral_analytical(int d) {
+  // Analytical integral: ∫[0,1]^n sin(π x_1) ... sin(π x_n) dx = (2/π)^n
+  return std::pow(2.0 / pi, d);
+}
+
 template <typename... DDims>
 std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
                        ddc::DeviceAllocator<double>>>
@@ -69,16 +75,10 @@ initialize_combination_scheme(
     ddc::parallel_for_each(
         instances[grid_index % instances.size()],
         component_grid_domains[grid_index], KOKKOS_LAMBDA(DElem const ixyz) {
-          constexpr size_t dimensionality = sizeof...(DDims);
-          double const x =
-              ddc::coordinate(ddc::DiscreteElement<DDimX>(ixyz)); // ??
-          double const y = ddc::coordinate(ddc::DiscreteElement<DDimY>(ixyz));
-          double result;
-          if constexpr (dimensionality == 3) {
-            double const z = ddc::coordinate(ddc::DiscreteElement<DDimZ>(ixyz));
-            result = std::cos(3.0 + (x + y + z));
-          } else if constexpr (dimensionality == 2) {
-            result = std::cos(3.0 + (x + y));
+          auto coordinate = ddc::coordinate(ixyz).array();
+          double result = 1.0;
+          for (double xi : coordinate) {
+            result *= std::sin(pi * xi);
           }
           strided_grid(ixyz) = result;
         });
@@ -179,7 +179,7 @@ void run_combination_technique(
     level_str += std::to_string(dimensionality) + "d";
     std::string const filename = "strided_grid_" + level_str + ".raw";
     paliwa::dump_chunk_span_to_binary_file(strided_grid, filename);
-    std::cout << strided_grid << std::endl;
+    // std::cout << strided_grid << std::endl;
   }
 
   std::string const wavelet_name = "biorthogonal";
@@ -353,9 +353,7 @@ void run_combination_technique(
                                      full_grid_view) /
       dom_all.size();
   std::cout << "Mean value on finest grid: " << mean_value << std::endl;
-  if constexpr (dimensionality == 2) {
-    // EXPECT_NEAR(mean_value, -0.650446, 1e-10); //TODO use analytical function
-  }
+  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.03);
 }
 
 template <size_t dimensionality>
