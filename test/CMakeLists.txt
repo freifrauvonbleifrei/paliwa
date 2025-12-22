@@ -12,6 +12,7 @@ add_executable(
     main.cpp
     test_paliwa_restrict.cpp
     test_paliwa_transform.cpp
+    test_paliwa_combination_technique.cpp
     )
 
 target_compile_features(paliwa_tests PUBLIC cxx_std_17)

@@ -72,12 +72,13 @@ endif()
 
 install(TARGETS paliwa_core EXPORT PaliwaCoreTargets FILE_SET HEADERS)
 
-add_executable( test_ddc_strided src/src.cpp )
-target_link_libraries( test_ddc_strided PUBLIC paliwa::core DDC::core Kokkos::kokkos )
-if(PALIWA_WITH_MPI)
-    target_link_libraries( test_ddc_strided PUBLIC MPI::MPI_CXX )
-    target_compile_definitions( test_ddc_strided PUBLIC PALIWA_WITH_MPI )
-endif()
+## no example, todo
+# add_executable( test_ddc_strided src/src.cpp )
+# target_link_libraries( test_ddc_strided PUBLIC paliwa::core DDC::core Kokkos::kokkos )
+# if(PALIWA_WITH_MPI)
+#     target_link_libraries( test_ddc_strided PUBLIC MPI::MPI_CXX )
+#     target_compile_definitions( test_ddc_strided PUBLIC PALIWA_WITH_MPI )
+# endif()
 
 if("${BUILD_TESTING}" AND "${PALIWA_BUILD_TESTS}")
     ## GoogleTest

@@ -19,6 +19,14 @@
 
 namespace paliwa {
 
+#ifdef PALIWA_WITH_MPI
+using MPICommType = MPI_Comm;
+#else
+using MPICommType = void *; // dummy type when MPI is not enabled
+#define MPI_COMM_WORLD nullptr
+#define MPI_COMM_NULL nullptr
+#endif // PALIWA_WITH_MPI
+
 struct MPIOptionalGuard {
   MPIOptionalGuard(int &argc, char **&argv) {
 #ifdef PALIWA_WITH_MPI
@@ -70,15 +78,20 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
                                                remaining_idx_range);
 }
 
-#ifdef PALIWA_WITH_MPI
 template <typename DiscreteDomainType>
-constexpr std::pair<DiscreteDomainType, MPI_Comm>
+constexpr std::pair<DiscreteDomainType, paliwa::MPICommType>
 decompose_domain_on_communicator(
-    DiscreteDomainType const &global_domain, MPI_Comm comm,
+    DiscreteDomainType const &global_domain, paliwa::MPICommType comm,
     std::array<int, DiscreteDomainType::rank()> const &par_vector) {
   static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,
                 "DiscreteDomainType must be a DDC discrete domain type");
   using DVect = typename DiscreteDomainType::discrete_vector_type;
+#ifndef PALIWA_WITH_MPI
+  assert(std::all_of(par_vector.begin(), par_vector.end(), [](int i) {
+    return i == 1;
+  })); // no parallelization without MPI
+  return {global_domain, MPI_COMM_NULL};
+#else // PALIWA_WITH_MPI
 #ifndef NDEBUG
   constexpr size_t dimensionality = DiscreteDomainType::rank();
   assert(dimensionality == par_vector.size());
@@ -112,8 +125,7 @@ decompose_domain_on_communicator(
   // dimension-recursive call
   return {distribute_idx_range(global_domain, par_vector_dv, my_coords_dv),
           comm_cart};
+#endif // PALIWA_WITH_MPI
 }
 
-
-#endif // PALIWA_WITH_MPI
 } // namespace paliwa

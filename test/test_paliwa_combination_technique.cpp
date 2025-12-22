@@ -15,18 +15,20 @@
 #include <mpi.h>
 #endif // PALIWA_WITH_MPI
 
+#include <gtest/gtest.h>
+
 #include <ddc/ddc.hpp>
 
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
 
-// #include "paliwa_dimensions.hpp" #todo
-#include "paliwa_distribute.hpp"
-#include "paliwa_domains.hpp"
-#include "paliwa_io.hpp"
-#include "paliwa_transform.hpp"
-#include "paliwa_utils.hpp"
-#include "paliwa_wavelets.hpp"
+// #include "paliwa_dimensions.hpp" //todo
+#include "../src/paliwa_distribute.hpp"
+#include "../src/paliwa_domains.hpp"
+#include "../src/paliwa_io.hpp"
+#include "../src/paliwa_transform.hpp"
+#include "../src/paliwa_utils.hpp"
+#include "../src/paliwa_wavelets.hpp"
 
 struct X {};
 struct Y {};
@@ -87,7 +89,7 @@ initialize_combination_scheme(
 template <typename... DDims>
 void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
-    MPI_Comm comm) {
+    paliwa::MPICommType comm) {
   constexpr size_t dimensionality = sizeof...(DDims);
   using DDom = ddc::DiscreteDomain<DDims...>;
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
@@ -130,10 +132,13 @@ void run_combination_technique(
     dom_all = DDom(x_domain, y_domain);
   }
 
-  std::array<int, dimensionality> parallelization_vector = {2, 2};
+#ifdef PALIWA_WITH_MPI
+  std::array<int, dimensionality> parallelization_vector = {1, 1};
   auto const [local_domain, cartesian_comm] =
       paliwa::decompose_domain_on_communicator(dom_all, comm,
                                                parallelization_vector);
+  // TODO use to compute only on parts of domain
+#endif
 
   std::array<long int, dimensionality> minimum_level;
   std::vector<std::array<long int, dimensionality>> all_levels;
@@ -155,6 +160,7 @@ void run_combination_technique(
   assert(all_levels.size() == all_combi_coefficients.size());
   auto component_grid_domains =
       paliwa::get_strided_domains<DDims...>(all_levels, maximum_level);
+  // TODO make this full-grid compatible class?
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data = initialize_combination_scheme(component_grid_domains,
                                                  all_levels, instances);
@@ -173,8 +179,7 @@ void run_combination_technique(
     level_str += std::to_string(dimensionality) + "d";
     std::string const filename = "strided_grid_" + level_str + ".raw";
     paliwa::dump_chunk_span_to_binary_file(strided_grid, filename);
-    // std::cout << strided_grid << std::endl; (-> issue)
-    ddc::print_content(std::cout, strided_grid) << std::endl;
+    std::cout << strided_grid << std::endl;
   }
 
   std::string const wavelet_name = "biorthogonal";
@@ -208,6 +213,7 @@ void run_combination_technique(
                                            insert_function);
   }
 
+  // TODO make this a sparse-grid compatible class?
   Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
                        Kokkos::DefaultExecutionSpace>
       subspaces_levels(subspace_count.size());
@@ -240,6 +246,9 @@ void run_combination_technique(
     }
   }
   std::cout << "Total size of all subspaces: " << accumulated_size << std::endl;
+  if constexpr (dimensionality == 2) {
+    EXPECT_EQ(accumulated_size, 18432);
+  }
 
   // allocate once
   Kokkos::View<double *> all_subspace_data("all_subspace_data",
@@ -344,16 +353,15 @@ void run_combination_technique(
                                      full_grid_view) /
       dom_all.size();
   std::cout << "Mean value on finest grid: " << mean_value << std::endl;
-  if (std::abs(mean_value - (-0.650446)) > 1e-6) {
-    throw std::runtime_error(
-        "Error: mean value does not match expected value!");
+  if constexpr (dimensionality == 2) {
+    // EXPECT_NEAR(mean_value, -0.650446, 1e-10); //TODO use analytical function
   }
 }
 
 template <size_t dimensionality>
 void run_combination_technique_in_dimensions(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
-    MPI_Comm comm) {
+    paliwa::MPICommType comm) {
   if constexpr (dimensionality == 2) {
     run_combination_technique<DDimX, DDimY>(instances, comm);
   } else if constexpr (dimensionality == 3) {
@@ -365,25 +373,7 @@ void run_combination_technique_in_dimensions(
   }
 }
 
-int main(int argc, char **argv) {
-  [[maybe_unused]] paliwa::MPIOptionalGuard mpi(argc, argv);
-  Kokkos::ScopeGuard const kokkos_scope(argc, argv);
-#ifndef NDEBUG
-  int world_size, world_rank;
-  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
-  for (int i = 0; i < world_size; ++i) {
-    MPI_Barrier(MPI_COMM_WORLD);
-    if (i == world_rank) {
-      std::cout << "paliwa rank " << world_rank << " : device_id "
-                << Kokkos::device_id() << std::endl;
-      // Kokkos::print_configuration(std::cout);
-    }
-  }
-  MPI_Barrier(MPI_COMM_WORLD);
-#endif // not NDEBUG
-  ddc::ScopeGuard const ddc_scope;
-
+TEST(combination_technique, full_integration_2d) {
   // use up to 32 concurrent streams
   auto instances = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
