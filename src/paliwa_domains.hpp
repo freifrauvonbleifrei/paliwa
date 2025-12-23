@@ -194,30 +194,35 @@ constexpr auto restrict_strided_with_discrete(
 }
 
 template <typename DDim, typename DomainType>
-constexpr auto restrict_sparse_with_other_domain(
+constexpr ddc::SparseDiscreteDomain<DDim> restrict_sparse_with_other_domain(
     ddc::SparseDiscreteDomain<DDim> const &sparse_domain,
     DomainType const &other_domain) {
   using DElem = ddc::DiscreteElement<DDim>;
   Kokkos::View<DElem *, Kokkos::SharedSpace> elements(
       "restricted_sparse_elements", sparse_domain.size());
+  auto other_domain_projected = ddc::select<DDim>(other_domain);
   size_t insert_index = 0;
-  ddc::host_for_each(sparse_domain,
-                     [&elements, &insert_index, &other_domain](DElem ixyz) {
-                       if (other_domain.contains(ixyz)) {
-                         elements(insert_index++) = ixyz;
-                       }
-                     });
+  ddc::host_for_each(sparse_domain, [&elements, &insert_index,
+                                     &other_domain_projected](DElem ixyz) {
+    if (other_domain_projected.contains(ixyz)) {
+      elements(insert_index++) = DElem(ixyz);
+    }
+  });
   Kokkos::resize(elements, insert_index);
   return ddc::SparseDiscreteDomain<DDim>(elements);
 }
 
-template <typename... DDims, typename DomainType,
-          typename = std::enable_if_t<sizeof...(DDims) >= 2, int>>
-constexpr auto restrict_sparse_with_other_domain(
-    ddc::SparseDiscreteDomain<DDims...> const &sparse_domain,
+template <typename FirstDim, typename... DDims, typename DomainType,
+          typename = std::enable_if_t<sizeof...(DDims) >= 1, int>>
+constexpr ddc::SparseDiscreteDomain<FirstDim, DDims...>
+restrict_sparse_with_other_domain(
+    ddc::SparseDiscreteDomain<FirstDim, DDims...> const &sparse_domain,
     DomainType const &other_domain) {
-  return ddc::SparseDiscreteDomain<DDims...>(restrict_sparse_with_other_domain(
-      ddc::select<DDims>(sparse_domain), other_domain)...);
+  return ddc::SparseDiscreteDomain<FirstDim, DDims...>(
+      restrict_sparse_with_other_domain<FirstDim>(
+          ddc::select<FirstDim>(sparse_domain), other_domain),
+      restrict_sparse_with_other_domain<DDims...>(
+          ddc::select<DDims...>(sparse_domain), other_domain));
 }
 
 template <typename DDim>
