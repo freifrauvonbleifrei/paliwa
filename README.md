@@ -1,12 +1,13 @@
 <!--
 SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md
 
-SPDX-License-Identifier: LGPL-2.1-or-later
+SPDX-License-Identifier: LGPL-3.0-or-later
 -->
 # paliwa : A code for parallel lifting wavelets
 
 [![Build & Test CI](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/)
 [![REUSE compliant](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/)
+[![License: LGPL](https://img.shields.io/badge/License-LGPLv3-green.svg)](https://www.gnu.org/licenses/lgpl-3.0) TODO
 ![C++≥20](https://img.shields.io/badge/c++-%E2%89%A520-blue.svg)
 
 ## Why lifting wavelets?

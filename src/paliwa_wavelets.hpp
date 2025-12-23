@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md
 //
-// SPDX-License-Identifier: LGPL-2.1-or-later
+// SPDX-License-Identifier: LGPL-3.0-or-later
 
 #pragma once
 
