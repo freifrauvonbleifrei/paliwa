@@ -175,7 +175,7 @@ void run_combination_technique(
     SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    paliwa::hierarchize(strided_grid, level, ddc_minimum_level,
+    paliwa::hierarchize(strided_grid, strided_domain, level, ddc_minimum_level,
                         ddc_maximum_level, wavelet_name,
                         instances[grid_index % instances.size()]);
   }
@@ -325,8 +325,9 @@ void run_combination_technique(
   paliwa::fence_all_instances(instances);
 
   //   de-hierarchize on the combined full grid
-  paliwa::dehierarchize(full_grid_view, ddc_maximum_level, ddc_minimum_level,
-                        ddc_maximum_level, wavelet_name, instances[0]);
+  paliwa::dehierarchize(full_grid_view, dom_all, ddc_maximum_level,
+                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
+                        instances[0]);
   paliwa::fence_all_instances(instances);
 
   std::string max_level_str = "";
