@@ -193,4 +193,71 @@ constexpr auto restrict_strided_with_discrete(
                                               thisdomain.strides());
 }
 
+template <typename DDim>
+constexpr auto sparse_from_strided_domain(
+    ddc::StridedDiscreteDomain<DDim> const &strided_domain) {
+  using DElem = ddc::DiscreteElement<DDim>;
+  Kokkos::View<DElem *, Kokkos::SharedSpace> elements("sparse_elements",
+                                                      strided_domain.size());
+  size_t insert_index = 0;
+  ddc::host_for_each(strided_domain, [&elements, &insert_index](DElem ixyz) {
+    elements(insert_index++) = ixyz;
+  });
+  return ddc::SparseDiscreteDomain<DDim>(elements);
+}
+
+template <typename... DDims>
+constexpr auto sparse_from_strided_domain(
+    ddc::StridedDiscreteDomain<DDims...> const &strided_domain) {
+  return ddc::SparseDiscreteDomain<DDims...>(
+      sparse_from_strided_domain(ddc::select<DDims>(strided_domain))...);
+}
+
+template <typename DDim>
+constexpr auto union_of_sparse_domains(
+    ddc::SparseDiscreteDomain<DDim> const &first_sparse_domain,
+    ddc::SparseDiscreteDomain<DDim> const &second_sparse_domain) {
+  using DElem = ddc::DiscreteElement<DDim>;
+  Kokkos::View<DElem *, Kokkos::SharedSpace> elements(
+      "union_sparse_elements",
+      first_sparse_domain.size() + second_sparse_domain.size());
+  size_t insert_index = 0;
+  auto first_domain_iterator = first_sparse_domain.begin();
+  auto second_domain_iterator = second_sparse_domain.begin();
+  while (first_domain_iterator != first_sparse_domain.end() &&
+         second_domain_iterator != second_sparse_domain.end()) {
+    if (*first_domain_iterator < *second_domain_iterator) {
+      elements(insert_index++) = DElem(*first_domain_iterator);
+      ++first_domain_iterator;
+    } else if (*second_domain_iterator < *first_domain_iterator) {
+      elements(insert_index++) = DElem(*second_domain_iterator);
+      ++second_domain_iterator;
+    } else {
+      elements(insert_index++) = DElem(*first_domain_iterator);
+      ++first_domain_iterator;
+      ++second_domain_iterator;
+    }
+  }
+  while (first_domain_iterator != first_sparse_domain.end()) {
+    elements(insert_index++) = DElem(*first_domain_iterator);
+    ++first_domain_iterator;
+  }
+  while (second_domain_iterator != second_sparse_domain.end()) {
+    elements(insert_index++) = DElem(*second_domain_iterator);
+    ++second_domain_iterator;
+  }
+  Kokkos::resize(elements, insert_index);
+  return ddc::SparseDiscreteDomain<DDim>(elements);
+}
+
+template <typename... DDims,
+          typename = std::enable_if_t<sizeof...(DDims) >= 2, int>>
+ddc::SparseDiscreteDomain<DDims...> union_of_sparse_domains(
+    ddc::SparseDiscreteDomain<DDims...> const &first_sparse_domain,
+    ddc::SparseDiscreteDomain<DDims...> const &second_sparse_domain) {
+  return ddc::SparseDiscreteDomain<DDims...>(
+      union_of_sparse_domains(ddc::select<DDims>(first_sparse_domain),
+                              ddc::select<DDims>(second_sparse_domain))...);
+}
+
 } // namespace paliwa
