@@ -122,6 +122,23 @@ void get_required_transform_domains_1d() {
             restricted_strided_dom, KOKKOS_LAMBDA(DElem ixyz) {
               ASSERT_FALSE(std::isnan(all_strided_span(ixyz)));
             });
+
+        // do the transform again and check for same result
+        if (is_for_hierarchization) {
+          paliwa::hierarchize(transform_span,
+                              required_transform_and_local_domain, level,
+                              minimum_level, maximum_level, wavelet_name,
+                              Kokkos::DefaultHostExecutionSpace());
+        } else {
+          paliwa::dehierarchize(transform_span,
+                                required_transform_and_local_domain, level,
+                                minimum_level, maximum_level, wavelet_name,
+                                Kokkos::DefaultHostExecutionSpace());
+        }
+        ddc::host_for_each(
+            restricted_strided_dom, KOKKOS_LAMBDA(DElem ixyz) {
+              EXPECT_EQ(all_strided_span(ixyz), transform_span(ixyz));
+            });
       }
     }
   }

@@ -63,6 +63,10 @@ transform_in(ChunkSpanType const strided_grid, DomainType const &chunk_domain,
 
       ddc::parallel_for_each(
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+            // TODO remove these checks for efficiency
+            if (!chunk_domain.contains(ixyz)) {
+              return;
+            }
             // check for out of bounds, periodic if necessary
             DElem lower_element = ixyz - this_d_stride;
             DElem upper_element = ixyz + this_d_stride;
@@ -80,6 +84,10 @@ transform_in(ChunkSpanType const strided_grid, DomainType const &chunk_domain,
                             operating_domain.front()))) {
               // on the lower boundary, no -1 available
               lower_element += virtual_length;
+            }
+            if (!chunk_domain.contains(lower_element) ||
+                !chunk_domain.contains(upper_element)) {
+              return;
             }
             strided_grid(ixyz) = filter[0] * strided_grid(lower_element) +
                                  filter[1] * strided_grid(ixyz) +
@@ -216,8 +224,7 @@ transform_mask(ChunkSpanType const strided_grid,
     auto const this_d_stride = ddc::DiscreteVector<DDim>(current_stride);
 
     for (auto const &[offset, filter] :
-         lifting_offsets_and_coefficients |
-             std::ranges::views::reverse) { //) { //
+         lifting_offsets_and_coefficients | std::ranges::views::reverse) {
       std::function<SDDom(SDDom const &)> coarsen_domain;
       if (offset == 0) {
         coarsen_domain = even_domain_functor;
