@@ -91,10 +91,11 @@ transform_in(ChunkSpanType const strided_grid, DomainType const &chunk_domain,
 }
 
 template <typename DDimInWhichToHierarchize, typename ChunkSpanType,
-          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename DomainType, // TODO derive from ChunkSpanType
+          typename ExecSpace,  // = Kokkos::DefaultExecutionSpace
           typename... DDims>
 constexpr bool
-hierarchize_in(ChunkSpanType const strided_grid,
+hierarchize_in(ChunkSpanType const strided_grid, DomainType const &chunk_domain,
                ddc::DiscreteVector<DDims...> const &level,
                ddc::DiscreteVector<DDims...> const &minimum_level,
                ddc::DiscreteVector<DDims...> const &maximum_level,
@@ -113,7 +114,7 @@ hierarchize_in(ChunkSpanType const strided_grid,
                        static_cast<long int>(ddc_level_1d_vec) + 1) |
       std::views::reverse;
   return transform_in<DDimInWhichToHierarchize>(
-      strided_grid, level, maximum_level, decreasing_range,
+      strided_grid, chunk_domain, level, maximum_level, decreasing_range,
       lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
       instance);
 }
