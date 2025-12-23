@@ -23,21 +23,22 @@ TEST(domain, sparse_domain_conversion_1d) {
   Kokkos::Random_XorShift64_Pool<Kokkos::DefaultHostExecutionSpace> random_pool(
       /*seed=*/12345);
   size_t insert_index = 0;
-  ddc::host_for_each(
-      local_domain, [&elements, &random_pool, &insert_index](DElem ixyz) {
-        auto generator = random_pool.get_state();
-        double random_number = generator.drand(0., 1.);
-        random_pool.free_state(generator);
-        if (random_number < 0.4) {
-          elements(insert_index++) = ixyz;
-        }
-      });
+  ddc::host_for_each(local_domain,
+                     [&elements, &random_pool, &insert_index](DElem ixyz) {
+                       auto generator = random_pool.get_state();
+                       double random_number = generator.drand(0., 1.);
+                       random_pool.free_state(generator);
+                       if (random_number < 0.4) {
+                         elements(insert_index++) = ixyz;
+                       }
+                     });
   Kokkos::resize(elements, insert_index);
   ddc::SparseDiscreteDomain<DDimX> sparse_domain(elements);
 
   ddc::StridedDiscreteDomain<DDimX> strided_domain(
       DElem(20), ddc::DiscreteVector<DDimX>(20), ddc::DiscreteVector<DDimX>(3));
 
+  // test union
   ddc::SparseDiscreteDomain<DDimX> sparse_and_strided_domain =
       paliwa::union_of_sparse_domains(
           paliwa::sparse_from_strided_domain(strided_domain), sparse_domain);
@@ -48,4 +49,17 @@ TEST(domain, sparse_domain_conversion_1d) {
   ddc::host_for_each(sparse_domain, [&sparse_and_strided_domain](DElem ixyz) {
     EXPECT_TRUE(sparse_and_strided_domain.contains(ixyz));
   });
+
+  // also test intersection
+  ddc::SparseDiscreteDomain<DDimX> restricted_sparse_domain =
+      paliwa::restrict_sparse_with_other_domain(sparse_domain, strided_domain);
+
+  ddc::host_for_each(sparse_domain,
+                     [&strided_domain, &restricted_sparse_domain](DElem ixyz) {
+                       if (strided_domain.contains(ixyz)) {
+                         EXPECT_TRUE(restricted_sparse_domain.contains(ixyz));
+                       } else {
+                         EXPECT_FALSE(restricted_sparse_domain.contains(ixyz));
+                       }
+                     });
 }
