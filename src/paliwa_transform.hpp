@@ -37,7 +37,7 @@ transform_in(ChunkSpanType const strided_grid, DomainType const &chunk_domain,
 
   ddc::DiscreteVector<DDims...> current_level(level);
   for (long int current_1d_level : one_d_level_range) {
-    assert(current_1d_level >= 0);
+    assert(current_1d_level > 0);
     current_level.template get<DDimInWhichToTransform>() = current_1d_level;
     auto const operating_domain = strided_domain_from_level<DDims...>(
         ddc::detail::array(current_level), ddc::detail::array(maximum_level));
@@ -184,6 +184,72 @@ constexpr void dehierarchize(ChunkSpanType const strided_grid,
        ...);
 }
 
+template <typename DDim, typename ChunkSpanType, typename LevelRange,
+          typename ExecSpace = Kokkos::DefaultHostExecutionSpace>
+constexpr void
+transform_mask(ChunkSpanType const strided_grid,
+               ddc::DiscreteVector<DDim> const &level,
+               ddc::DiscreteVector<DDim> const &maximum_level,
+               LevelRange const &one_d_level_range,
+               std::vector<std::pair<int, std::array<double, 3>>> const
+                   &lifting_offsets_and_coefficients,
+               ExecSpace instance = ExecSpace()) {
+  /** like transform_in, but only 1d and updates (last lines) are reverse
+   *   strided_grid should be nonzero only on the local domain
+   *   -> find data dependencies
+   *   assumes that strided_grid spans the whole strided domain for level
+   */
+  using DElem = ddc::DiscreteElement<DDim>;
+  using SDDom = ddc::StridedDiscreteDomain<DDim>;
+  auto [even_domain_functor, odd_domain_functor] =
+      get_even_and_odd_half_domain_functors<DDim, DDim>();
+
+  ddc::DiscreteVector<DDim> current_level(level);
+  for (long int current_1d_level : one_d_level_range) {
+    assert(current_1d_level > 0);
+    current_level.template get<DDim>() = current_1d_level;
+    auto const operating_domain = strided_domain_from_level<DDim>(
+        ddc::detail::array(current_level), ddc::detail::array(maximum_level));
+    auto const current_stride = operating_domain.strides();
+    auto const virtual_length =
+        ddc::DiscreteVector<DDim>(operating_domain.extents() * current_stride);
+    auto const this_d_stride = ddc::DiscreteVector<DDim>(current_stride);
+
+    for (auto const &[offset, filter] :
+         lifting_offsets_and_coefficients |
+             std::ranges::views::reverse) { //) { //
+      std::function<SDDom(SDDom const &)> coarsen_domain;
+      if (offset == 0) {
+        coarsen_domain = even_domain_functor;
+      } else if (offset == 1) {
+        coarsen_domain = odd_domain_functor;
+      } else {
+        throw std::runtime_error("Filter offset not supported");
+      }
+      auto const read_from_domain = coarsen_domain(operating_domain);
+      ddc::parallel_for_each(
+          instance, read_from_domain, KOKKOS_LAMBDA(DElem const ixyz) {
+            if (strided_grid(ixyz) == 0.0) {
+              return;
+            }
+            DElem lower_element = ixyz - this_d_stride;
+            DElem upper_element = ixyz + this_d_stride;
+            if ((offset == 1) &&
+                (ixyz + this_d_stride > read_from_domain.back())) {
+              upper_element -= virtual_length;
+            } else if ((offset == 0) && (ixyz <= operating_domain.front())) {
+              lower_element += virtual_length;
+            }
+            strided_grid(lower_element) +=
+                std::abs(filter[0]) * strided_grid(ixyz);
+            strided_grid(ixyz) += std::abs(filter[1]) * strided_grid(ixyz);
+            strided_grid(upper_element) +=
+                std::abs(filter[2]) * strided_grid(ixyz);
+          });
+    }
+  }
+}
+
 template <typename SelectedDim, typename SDDom, typename DDom>
 constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
     bool is_for_hierarchization, SDDom const &full_domain,
@@ -196,33 +262,30 @@ constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
   using DElem = ddc::DiscreteElement<SelectedDim>;
 
   // initialize full pole to zero
-  ddc::Chunk full_pole_chunk("full_pole_chunk", full_domain,
-                             ddc::HostAllocator<double>());
+  ddc::Chunk full_pole_chunk(
+      "full_pole_chunk", full_domain,
+      ddc::HostAllocator<float>()); // todo smaller data type
   auto full_pole = full_pole_chunk.span_view();
   ddc::parallel_for_each(
       Kokkos::DefaultHostExecutionSpace(), full_domain,
       KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 0.0; });
-  // cf.
-  // https://kokkos.org/kokkos-core-wiki/API/algorithms/Random-Number.html#example
-  Kokkos::Random_XorShift64_Pool<Kokkos::HostSpace> random_pool(/*seed=*/12345);
   ddc::parallel_for_each(
       Kokkos::DefaultHostExecutionSpace(), local_domain,
-      KOKKOS_LAMBDA(DElem const ixyz) {
-        auto generator = random_pool.get_state();
-        double random_number = generator.drand(0., 1.);
-        random_pool.free_state(generator);
-        full_pole(ixyz) = ixyz.uid() * 100000.0 *
-                          (2 + random_number); // just some non-zero value
-        // TODO make all stencil values non-negative instead
-      });
+      KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 1.0; });
+  auto increasing_range =
+      std::views::iota(static_cast<long int>(minimum_level + 1),
+                       static_cast<long int>(level) + 1);
+  auto decreasing_range = increasing_range | std::views::reverse;
+  // TODO this currently gives too many indices -> unnecessary work
   if (is_for_hierarchization) {
-    dehierarchize_in<SelectedDim>(full_pole, level, minimum_level,
-                                  maximum_level, wavelet_name,
-                                  Kokkos::DefaultHostExecutionSpace());
+    transform_mask<SelectedDim>(
+        full_pole, level, maximum_level, increasing_range,
+        lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name));
   } else {
-    hierarchize_in<SelectedDim>(full_pole, level, minimum_level, maximum_level,
-                                wavelet_name,
-                                Kokkos::DefaultHostExecutionSpace());
+
+    transform_mask<SelectedDim>(
+        full_pole, level, maximum_level, decreasing_range,
+        lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name));
   }
   // set to 0.0 on local_domain
   ddc::parallel_for_each(
