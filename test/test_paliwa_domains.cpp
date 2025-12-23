@@ -23,17 +23,15 @@ TEST(domain, sparse_domain_conversion_1d) {
   Kokkos::Random_XorShift64_Pool<Kokkos::DefaultHostExecutionSpace> random_pool(
       /*seed=*/12345);
   size_t insert_index = 0;
-  ddc::host_for_each(local_domain,
-                     [&elements, &random_pool, &insert_index](DElem ixyz) {
-                       auto generator = random_pool.get_state();
-                       double random_number = generator.drand(0., 1.);
-                       random_pool.free_state(generator);
-                       if (random_number < 0.4) {
-                          std::cout << "Inserting element " << ixyz.uid<DDimX>()
-                                    << "\n";
-                         elements(insert_index++) = ixyz;
-                       }
-                     });
+  ddc::host_for_each(
+      local_domain, [&elements, &random_pool, &insert_index](DElem ixyz) {
+        auto generator = random_pool.get_state();
+        double random_number = generator.drand(0., 1.);
+        random_pool.free_state(generator);
+        if (random_number < 0.4) {
+          elements(insert_index++) = ixyz;
+        }
+      });
   Kokkos::resize(elements, insert_index);
   ddc::SparseDiscreteDomain<DDimX> sparse_domain(elements);
 
