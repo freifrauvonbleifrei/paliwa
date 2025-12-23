@@ -10,6 +10,7 @@ include(GoogleTest)
 add_executable(
     paliwa_tests
     main.cpp
+    test_paliwa_domains.cpp
     test_paliwa_restrict.cpp
     test_paliwa_transform.cpp
     test_paliwa_combination_technique.cpp
