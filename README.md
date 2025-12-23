@@ -60,7 +60,7 @@ After executing the test [`full_integration_2d`](https://github.com/freifrauvonb
 you can visualize its results by running
 
 ```bash
-python3 ../src/postprocess.py
+python3 ../paliwa/postprocess.py
 ```
 
 in the build folder.

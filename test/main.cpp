@@ -12,7 +12,7 @@
 #include <ddc/ddc.hpp>
 #include <gtest/gtest.h>
 
-#include "../src/paliwa_distribute.hpp"
+#include "../paliwa/paliwa_distribute.hpp"
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

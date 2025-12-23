@@ -22,13 +22,13 @@
 #include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
 
-#include "../src/paliwa_dimensions.hpp"
-#include "../src/paliwa_distribute.hpp"
-#include "../src/paliwa_domains.hpp"
-#include "../src/paliwa_io.hpp"
-#include "../src/paliwa_transform.hpp"
-#include "../src/paliwa_utils.hpp"
-#include "../src/paliwa_wavelets.hpp"
+#include "../paliwa/paliwa_dimensions.hpp"
+#include "../paliwa/paliwa_distribute.hpp"
+#include "../paliwa/paliwa_domains.hpp"
+#include "../paliwa/paliwa_io.hpp"
+#include "../paliwa/paliwa_transform.hpp"
+#include "../paliwa/paliwa_utils.hpp"
+#include "../paliwa/paliwa_wavelets.hpp"
 
 constexpr double pi = 3.14159265358979323846;
 double sinusoid_integral_analytical(int d) {

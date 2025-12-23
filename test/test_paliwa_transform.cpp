@@ -6,8 +6,8 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/paliwa_distribute.hpp"
-#include "../src/paliwa_domains.hpp"
+#include "../paliwa/paliwa_distribute.hpp"
+#include "../paliwa/paliwa_domains.hpp"
 
 struct X {};
 struct Y {};

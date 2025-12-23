@@ -54,13 +54,13 @@ target_sources(
             #BASE_DIRS include ${CMAKE_CURRENT_BINARY_DIR}/generated
             FILES
                 #${CMAKE_CURRENT_BINARY_DIR}/generated/ddc/config.hpp
-                src/paliwa_dimensions.hpp
-                src/paliwa_distribute.hpp
-                src/paliwa_domains.hpp
-                src/paliwa_io.hpp
-                src/paliwa_transform.hpp
-                src/paliwa_utils.hpp
-                src/paliwa_wavelets.hpp
+                paliwa/paliwa_dimensions.hpp
+                paliwa/paliwa_distribute.hpp
+                paliwa/paliwa_domains.hpp
+                paliwa/paliwa_io.hpp
+                paliwa/paliwa_transform.hpp
+                paliwa/paliwa_utils.hpp
+                paliwa/paliwa_wavelets.hpp
 )
 target_compile_features(paliwa_core INTERFACE cxx_std_20)
 target_link_libraries(paliwa_core INTERFACE Kokkos::kokkos)
@@ -73,7 +73,7 @@ endif()
 install(TARGETS paliwa_core EXPORT PaliwaCoreTargets FILE_SET HEADERS)
 
 ## no example, todo
-# add_executable( test_ddc_strided src/src.cpp )
+# add_executable( test_ddc_strided paliwa/src.cpp )
 # target_link_libraries( test_ddc_strided PUBLIC paliwa::core DDC::core Kokkos::kokkos )
 # if(PALIWA_WITH_MPI)
 #     target_link_libraries( test_ddc_strided PUBLIC MPI::MPI_CXX )

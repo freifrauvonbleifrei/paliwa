@@ -8,8 +8,8 @@
 
 #include <gtest/gtest.h>
 
-#include "../src/paliwa_domains.hpp"
-#include "../src/paliwa_transform.hpp"
+#include "../paliwa/paliwa_domains.hpp"
+#include "../paliwa/paliwa_transform.hpp"
 
 struct X {};
 struct Y {};
