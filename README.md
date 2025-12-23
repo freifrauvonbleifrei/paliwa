@@ -54,3 +54,13 @@ for details on a compatible environment.)
 ## Usage
 
 Currently, the best usage documentation are in the [test codes](./test/).
+
+After executing the test [`full_integration_2d`](https://github.com/freifrauvonbleifrei/paliwa/blob/main/test/test_paliwa_combination_technique.cpp#L366),
+you can visualize its results by running
+
+```bash
+python3 ../src/postprocess.py
+```
+
+in the build folder.
+The script creates a png file.

@@ -16,7 +16,9 @@ def filename_from_level(level):
 
 if __name__ == "__main__":
     # combination_scheme = [[4,6,7], [5,5,7], [5,6,6], [4,5,6]]
-    combination_scheme = [[2, 5], [3, 4], [4, 3], [2, 4], [3, 3]]
+    # combination_scheme = [[2, 5], [3, 4], [4, 3], [2, 4], [3, 3]]
+    combination_scheme = [[2, 11], [2, 10], [3, 10], [3, 9], [4, 9], [4, 8], [5, 8], [5, 7], 
+        [6, 7], [6, 6], [7, 6], [7, 5], [8, 5], [8, 4], [9, 4], [9, 3], [10, 3]]
     minimum_level = np.min(combination_scheme, axis=0)
     maximum_level = np.max(combination_scheme, axis=0)
     ic(minimum_level, maximum_level)
