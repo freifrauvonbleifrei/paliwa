@@ -6,7 +6,7 @@ SPDX-License-Identifier: LGPL-2.1-or-later
 # paliwa : A code for parallel lifting wavelets
 
 [![Build & Test CI](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/)
-[![REUSE compliant](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yml/)
+[![REUSE compliant](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/)
 ![C++≥20](https://img.shields.io/badge/c++-%E2%89%A520-blue.svg)
 
 ## Why lifting wavelets?
