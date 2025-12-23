@@ -28,7 +28,7 @@ using MPICommType = void *; // dummy type when MPI is not enabled
 #endif // PALIWA_WITH_MPI
 
 struct MPIOptionalGuard {
-  MPIOptionalGuard(int &argc, char **&argv) {
+  MPIOptionalGuard([[maybe_unused]] int &argc, [[maybe_unused]] char **&argv) {
 #ifdef PALIWA_WITH_MPI
     MPI_Init(&argc, &argv);
 #endif // PALIWA_WITH_MPI
