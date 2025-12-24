@@ -220,9 +220,9 @@ restrict_sparse_with_other_domain(
     DomainType const &other_domain) {
   return ddc::SparseDiscreteDomain<FirstDim, DDims...>(
       restrict_sparse_with_other_domain<FirstDim>(
-          ddc::select<FirstDim>(sparse_domain), other_domain),
+          ddc::SparseDiscreteDomain<FirstDim>(sparse_domain), other_domain),
       restrict_sparse_with_other_domain<DDims...>(
-          ddc::select<DDims...>(sparse_domain), other_domain));
+          ddc::SparseDiscreteDomain<DDims...>(sparse_domain), other_domain));
 }
 
 template <typename DDim>
@@ -288,8 +288,8 @@ ddc::SparseDiscreteDomain<DDims...> union_of_sparse_domains(
     ddc::SparseDiscreteDomain<DDims...> const &first_sparse_domain,
     ddc::SparseDiscreteDomain<DDims...> const &second_sparse_domain) {
   return ddc::SparseDiscreteDomain<DDims...>(
-      union_of_sparse_domains(ddc::select<DDims>(first_sparse_domain),
-                              ddc::select<DDims>(second_sparse_domain))...);
+      union_of_sparse_domains(ddc::SparseDiscreteDomain<DDims>(first_sparse_domain),
+                              ddc::SparseDiscreteDomain<DDims>(second_sparse_domain))...);
 }
 
 } // namespace paliwa

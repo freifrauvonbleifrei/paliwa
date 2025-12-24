@@ -89,6 +89,7 @@ TEST(domain, sparse_domain_conversion_2d) {
       ddc::DiscreteElement<DDimX, DDimY>(std::array<int, 2>({10, 10})),
       ddc::DiscreteVector<DDimX, DDimY>(std::array<long int, 2>({10, 10})),
       ddc::DiscreteVector<DDimX, DDimY>(std::array<long int, 2>({2, 3})));
+
   // test union
   ddc::SparseDiscreteDomain<DDimX, DDimY> sparse_and_strided_domain =
       paliwa::union_of_sparse_domains(
@@ -99,19 +100,16 @@ TEST(domain, sparse_domain_conversion_2d) {
   ddc::host_for_each(sparse_domain, [&sparse_and_strided_domain](DElem ixyz) {
     EXPECT_TRUE(sparse_and_strided_domain.contains(ixyz));
   });
-//   auto first_dim_sparse_and_strided = //TODO why does this fail? -> needed to make the rest work
-//       ddc::select<DDimX>(sparse_and_strided_domain);
-  //   // also test intersection
-  //   ddc::SparseDiscreteDomain<DDimX, DDimY> restricted_sparse_domain =
-  //       paliwa::restrict_sparse_with_other_domain(sparse_domain,
-  //       strided_domain);
-  //   ddc::host_for_each(sparse_domain,
-  //                      [&strided_domain, &restricted_sparse_domain](DElem
-  //                      ixyz) {
-  //                        if (strided_domain.contains(ixyz)) {
-  //                          EXPECT_TRUE(restricted_sparse_domain.contains(ixyz));
-  //                        } else {
-  //                          EXPECT_FALSE(restricted_sparse_domain.contains(ixyz));
-  //                        }
-  //                      });
+
+  // also test intersection
+  ddc::SparseDiscreteDomain<DDimX, DDimY> restricted_sparse_domain =
+      paliwa::restrict_sparse_with_other_domain(sparse_domain, strided_domain);
+  ddc::host_for_each(sparse_domain,
+                     [&strided_domain, &restricted_sparse_domain](DElem ixyz) {
+                       if (strided_domain.contains(ixyz)) {
+                         EXPECT_TRUE(restricted_sparse_domain.contains(ixyz));
+                       } else {
+                         EXPECT_FALSE(restricted_sparse_domain.contains(ixyz));
+                       }
+                     });
 }
