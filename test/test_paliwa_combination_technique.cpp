@@ -99,7 +99,9 @@ void run_combination_technique(
       paliwa::initialize_dims_periodic_unit_cube<DDims...>(resolution_all);
 
 #ifdef PALIWA_WITH_MPI
-  std::array<int, dimensionality> parallelization_vector = {1, 1};
+  std::array<int, dimensionality> parallelization_vector;
+  std::fill (parallelization_vector.begin(),
+             parallelization_vector.end(), 1);
   auto const [local_domain, cartesian_comm] =
       paliwa::decompose_domain_on_communicator(dom_all, comm,
                                                parallelization_vector);
