@@ -18,6 +18,21 @@ struct H {};
 struct I {};
 struct J {};
 struct K {};
+struct L {};
+struct M {};
+struct N {};
+struct O {};
+struct P {};
+struct Q {};
+struct R {};
+struct S {};
+struct T {};
+struct U {};
+struct V {};
+struct W {};
+struct X {};
+struct Y {};
+struct Z {};
 
 template <typename T, size_t type_number> struct NumberedType : T {
   static constexpr size_t ID = type_number;
@@ -37,6 +52,21 @@ using DDimH = D_Dim<H>;
 using DDimI = D_Dim<I>;
 using DDimJ = D_Dim<J>;
 using DDimK = D_Dim<K>;
+using DDimL = D_Dim<L>;
+using DDimM = D_Dim<M>;
+using DDimN = D_Dim<N>;
+using DDimO = D_Dim<O>;
+using DDimP = D_Dim<P>;
+using DDimQ = D_Dim<Q>;
+using DDimR = D_Dim<R>;
+using DDimS = D_Dim<S>;
+using DDimT = D_Dim<T>;
+using DDimU = D_Dim<U>;
+using DDimV = D_Dim<V>;
+using DDimW = D_Dim<W>;
+using DDimX = D_Dim<X>;
+using DDimY = D_Dim<Y>;
+using DDimZ = D_Dim<Z>;
 
 template <typename DDim>
 ddc::DiscreteDomain<DDim> initialize_dim_periodic_unit_interval(
