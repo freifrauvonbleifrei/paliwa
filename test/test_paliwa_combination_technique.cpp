@@ -305,6 +305,7 @@ void run_combination_technique(
   ddc::Chunk full_grid("interpolated_on_full_grid", dom_all,
                        ddc::DeviceAllocator<double>());
   auto full_grid_view = full_grid.span_view();
+  ddc::parallel_fill(full_grid_view, 0);
 
   // now copy into full grid
   for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
