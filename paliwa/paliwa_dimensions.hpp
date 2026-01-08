@@ -50,17 +50,27 @@ ddc::DiscreteDomain<DDim> initialize_dim_periodic_unit_interval(
 
 template <typename DDimToInitialize, typename... DDims,
           typename = std::enable_if_t<(sizeof...(DDims) > 1)>>
-ddc::DiscreteDomain<DDimToInitialize> initialize_dims_periodic_unit_intervals(
+ddc::DiscreteDomain<DDimToInitialize>
+optional_initialize_dims_periodic_unit_intervals(
     ddc::DiscreteVector<DDims...> const &resolution) {
-  return initialize_dim_periodic_unit_interval<DDimToInitialize>(
-      ddc::select<DDimToInitialize>(resolution));
+  if (ddc::is_discrete_space_initialized<DDimToInitialize>()) {
+    assert(ddc::host_discrete_space<DDimToInitialize>().origin() == 0.0);
+    assert(ddc::host_discrete_space<DDimToInitialize>().step() ==
+           1.0 / (ddc::select<DDimToInitialize>(resolution) - 1));
+    assert(ddc::host_discrete_space<DDimToInitialize>().front() ==
+           ddc::DiscreteElement<DDimToInitialize>(0));
+    return ddc::DiscreteDomain<DDimToInitialize>();
+  } else {
+    return initialize_dim_periodic_unit_interval<DDimToInitialize>(
+        ddc::select<DDimToInitialize>(resolution));
+  }
 }
 
 template <typename... DDims>
-ddc::DiscreteDomain<DDims...>
-initialize_dims_periodic_unit_cube(ddc::DiscreteVector<DDims...> &resolution) {
+ddc::DiscreteDomain<DDims...> optional_initialize_dims_periodic_unit_cube(
+    ddc::DiscreteVector<DDims...> &resolution) {
   return ddc::DiscreteDomain<DDims...>(
-      initialize_dims_periodic_unit_intervals<DDims>(resolution)...);
+      optional_initialize_dims_periodic_unit_intervals<DDims>(resolution)...);
 }
 
 } // namespace paliwa
