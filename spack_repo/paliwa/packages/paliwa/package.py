@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright Spack Project Developers.
 # See COPYRIGHT file for details.
 #
-# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# (cf. https://github.com/dev-build-deploy/reuse-me/issues/189)
 
 from spack_repo.builtin.build_systems.cmake import CMakePackage
 
