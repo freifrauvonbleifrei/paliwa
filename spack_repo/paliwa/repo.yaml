@@ -1,2 +1,7 @@
+# SPDX-FileCopyrightText: Copyright Spack Project Developers. 
+# See COPYRIGHT file for details.
+#
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
 repo:
   api: v2.2

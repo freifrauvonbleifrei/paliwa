@@ -1,10 +1,12 @@
-# Copyright Spack Project Developers. See COPYRIGHT file for details.
+# SPDX-FileCopyrightText: Copyright Spack Project Developers.
+# See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 from spack_repo.builtin.build_systems.cmake import CMakePackage
 
 from spack.package import *
+
 
 class Paliwa(CMakePackage):
     """paliwa is a library for parallel lifting wavelet transforms."""
@@ -31,6 +33,6 @@ class Paliwa(CMakePackage):
         args = [
             self.define("PALIWA_BUILD_EXAMPLES", False),
             self.define_from_variant("PALIWA_BUILD_TESTS", "tests"),
-            self.define_from_variant("PALIWA_WITH_MPI", "mpi")
+            self.define_from_variant("PALIWA_WITH_MPI", "mpi"),
         ]
         return args
