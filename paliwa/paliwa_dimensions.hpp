@@ -72,9 +72,9 @@ template <typename DDim>
 ddc::DiscreteDomain<DDim> initialize_dim_periodic_unit_interval(
     ddc::DiscreteVector<DDim> const &resolution) {
   using CDim = typename DDim::continuous_dimension_type;
-  auto const domain_with_periodic_point =
-      ddc::init_discrete_space<DDim>(DDim::template init<DDim>(
-          ddc::Coordinate<CDim>(0.0), ddc::Coordinate<CDim>(1.0), resolution));
+  auto const domain_with_periodic_point = ddc::init_discrete_space<DDim>(
+      DDim::template init<DDim>(ddc::Coordinate<CDim>(0.0),
+                                ddc::Coordinate<CDim>(1.0), resolution + 1));
   return domain_with_periodic_point.remove_last(ddc::DiscreteVector<DDim>(1));
 }
 
@@ -86,7 +86,7 @@ optional_initialize_dims_periodic_unit_intervals(
   if (ddc::is_discrete_space_initialized<DDimToInitialize>()) {
     assert(ddc::host_discrete_space<DDimToInitialize>().origin() == 0.0);
     assert(ddc::host_discrete_space<DDimToInitialize>().step() ==
-           1.0 / (ddc::select<DDimToInitialize>(resolution) - 1));
+           1.0 / (ddc::select<DDimToInitialize>(resolution)));
     assert(ddc::host_discrete_space<DDimToInitialize>().front() ==
            ddc::DiscreteElement<DDimToInitialize>(0));
     return ddc::DiscreteDomain<DDimToInitialize>();

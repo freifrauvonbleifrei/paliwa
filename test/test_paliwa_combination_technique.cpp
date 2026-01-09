@@ -76,15 +76,14 @@ void run_combination_technique(
     std::vector<Kokkos::DefaultExecutionSpace> const &instances,
     paliwa::MPICommType comm) {
   constexpr size_t dimensionality = sizeof...(DDims);
-  using DDom = ddc::DiscreteDomain<DDims...>;
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   using DElem = SDDom::discrete_element_type;
   using DVect = SDDom::discrete_vector_type;
   std::array<long int, dimensionality> maximum_level;
-  if constexpr (dimensionality == 3) {
-    maximum_level = {5, 6, 7};
-  } else if constexpr (dimensionality == 2) {
+  if constexpr (dimensionality == 2) {
     maximum_level = {10, 11};
+  } else if constexpr (dimensionality == 3) {
+    maximum_level = {5, 6, 7};
   } else if constexpr (dimensionality == 4) {
     maximum_level = {3, 4, 5, 6};
   } else {
@@ -92,7 +91,7 @@ void run_combination_technique(
   }
   std::array<long int, dimensionality> resolution;
   std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
-                 [](int ml) { return (1 << ml) + 1; });
+                 [](int ml) { return (1 << ml); });
   DVect resolution_all(resolution);
 
   ddc::DiscreteDomain<DDims...> dom_all =
