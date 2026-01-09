@@ -46,9 +46,8 @@ void test_transform_hat_stays_same_2d() {
       auto strided_grid_host_before = ddc::create_mirror_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
 
-      paliwa::hierarchize(strided_grid, strided_domain, level, minimum_level,
-                          maximum_level, "hat",
-                          Kokkos::DefaultExecutionSpace());
+      paliwa::hierarchize(strided_grid, level, minimum_level, maximum_level,
+                          "hat", Kokkos::DefaultExecutionSpace());
       auto strided_grid_host = ddc::create_mirror_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
       SDDom const strided_domain_lmin =
@@ -64,9 +63,8 @@ void test_transform_hat_stays_same_2d() {
         }
       });
 
-      paliwa::dehierarchize(strided_grid, strided_domain, level, minimum_level,
-                            maximum_level, "hat",
-                            Kokkos::DefaultExecutionSpace());
+      paliwa::dehierarchize(strided_grid, level, minimum_level, maximum_level,
+                            "hat", Kokkos::DefaultExecutionSpace());
       auto strided_grid_host_after = ddc::create_mirror_view_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
       ddc::host_for_each(strided_domain, [&](DElem const ixy) {
@@ -114,9 +112,8 @@ void test_transform_mass_conservation_2d(std::string wavelet_name) {
               Kokkos::DefaultExecutionSpace(), strided_domain, 0.0,
               ddc::reducer::sum<double>(), strided_grid) /
           strided_domain.size();
-      paliwa::hierarchize(strided_grid, strided_domain, level, minimum_level,
-                          maximum_level, wavelet_name,
-                          Kokkos::DefaultExecutionSpace());
+      paliwa::hierarchize(strided_grid, level, minimum_level, maximum_level,
+                          wavelet_name, Kokkos::DefaultExecutionSpace());
       // // for lmin [0, 0], can check the first entry too
       // auto strided_grid_host = ddc::create_mirror_view_and_copy(
       //     Kokkos::SharedHostPinnedSpace(), strided_grid);
