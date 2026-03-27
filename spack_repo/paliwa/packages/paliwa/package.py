@@ -25,7 +25,7 @@ class Paliwa(CMakePackage):
 
     depends_on("cxx", type="build")
     depends_on("cmake@3.25:", type="build")
-    depends_on("ddc~splines~fft")
+    depends_on("ddc@0.11.0:~splines~fft")
     depends_on("googletest", when="+tests", type="test")
     depends_on("kokkos")
     depends_on("mpi", when="+mpi")
