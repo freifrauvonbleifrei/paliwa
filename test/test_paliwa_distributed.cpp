@@ -293,6 +293,85 @@ TEST(distributed, roundtrip_1d_hat) { roundtrip_1d_hat(); }
 TEST(distributed, roundtrip_1d_biorthogonal) { roundtrip_1d_bio(); }
 TEST(distributed, roundtrip_1d_fullweighting) { roundtrip_1d_fw(); }
 
+void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
+  using Dim = paliwa::DDimT;
+
+  int world_size, world_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  if (world_size < 8) {
+    GTEST_SKIP() << "Need at least 8 MPI ranks";
+  }
+
+  int color = (world_rank < 8) ? 0 : MPI_UNDEFINED;
+  MPI_Comm sub_comm;
+  MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &sub_comm);
+  if (color == MPI_UNDEFINED)
+    return;
+
+  constexpr long int max_level = 9, level_val = 8, min_level = 2;
+  long int global_size = 1L << max_level; // 512
+
+  ddc::DiscreteDomain<Dim> global_dom;
+  if (ddc::is_discrete_space_initialized<Dim>()) {
+    global_dom = ddc::DiscreteDomain<Dim>(
+        ddc::DiscreteElement<Dim>(0), ddc::DiscreteVector<Dim>(global_size));
+  } else {
+    global_dom = paliwa::initialize_dim_periodic_unit_interval<Dim>(
+        ddc::DiscreteVector<Dim>(global_size));
+  }
+
+  // 8 ranks along a single dimension
+  std::array<int, 1> par_vector = {8};
+  auto [local_dom, cart_comm] = paliwa::decompose_domain_on_communicator(
+      global_dom, sub_comm, par_vector);
+
+  using DVect = ddc::DiscreteVector<Dim>;
+  DVect level_v(std::array<long int, 1>{level_val});
+  DVect min_level_v(std::array<long int, 1>{min_level});
+  DVect max_level_v(std::array<long int, 1>{max_level});
+
+  auto full_strided = paliwa::strided_domain_from_level<Dim>(
+      ddc::detail::array(level_v), ddc::detail::array(max_level_v));
+  auto local_strided =
+      paliwa::restrict_strided_with_discrete(full_strided, local_dom);
+
+  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
+  auto local_span = local_chunk.span_view();
+  ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
+  auto orig_span = orig_chunk.span_view();
+
+  ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+    local_span(e) = std::sin(2.0 * pi_dist * ddc::coordinate(e));
+    orig_span(e) = local_span(e);
+  });
+
+  paliwa::distributed_hierarchize(
+      local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
+      cart_comm, Kokkos::DefaultHostExecutionSpace());
+
+  paliwa::distributed_dehierarchize(
+      local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
+      cart_comm, Kokkos::DefaultHostExecutionSpace());
+
+  ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+    EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
+  });
+
+  MPI_Comm_free(&cart_comm);
+  MPI_Comm_free(&sub_comm);
+}
+
+TEST(distributed, roundtrip_1d_8ranks_hat) {
+  test_distributed_roundtrip_1d_8ranks("hat");
+}
+TEST(distributed, roundtrip_1d_8ranks_biorthogonal) {
+  test_distributed_roundtrip_1d_8ranks("biorthogonal");
+}
+TEST(distributed, roundtrip_1d_8ranks_fullweighting) {
+  test_distributed_roundtrip_1d_8ranks("fullweighting");
+}
+
 void distributed_roundtrip_2d_all_wavelets() {
   using DimX = paliwa::DDimY;
   using DimY = paliwa::DDimZ;

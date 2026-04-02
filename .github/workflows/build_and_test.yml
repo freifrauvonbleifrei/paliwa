@@ -93,6 +93,7 @@ jobs:
         mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
+        mpiexec --oversubscribe -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}

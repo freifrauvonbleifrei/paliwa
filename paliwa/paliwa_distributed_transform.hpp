@@ -5,6 +5,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <vector>
 
 #include <ddc/ddc.hpp>
@@ -51,18 +52,22 @@ compute_peer_exchanges(
                cart_coords.data());
   int n_ranks_along_dim = cart_dims[dim_index];
 
-  std::vector<PeerExchange<DElem1d>> peers;
+  int my_rank = -1;
+  MPI_Comm_rank(cart_comm, &my_rank);
+  int my_coord = cart_coords[dim_index];
 
-  for (auto &[remote_rank, indices] : ghost_by_rank) {
-    PeerExchange<DElem1d> peer;
-    peer.remote_rank = remote_rank;
-    peer.indices_we_need = std::move(indices);
+  // For each rank along this dimension, compute what they need from us
+  std::map<int, std::vector<DElem1d>> they_need_from_us;
+  for (int coord = 0; coord < n_ranks_along_dim; ++coord) {
+    if (coord == my_coord)
+      continue;
+    std::vector<int> remote_coords_v(cart_coords);
+    remote_coords_v[dim_index] = coord;
+    int remote_rank = -1;
+    MPI_Cart_rank(cart_comm, remote_coords_v.data(), &remote_rank);
 
-    // Compute the remote rank's ghost zone
-    std::vector<int> remote_coords(n_dims_cart);
-    MPI_Cart_coords(cart_comm, remote_rank, n_dims_cart, remote_coords.data());
     auto remote_local_1d = get_rank_local_domain_along_dim<DimToTransform>(
-        global_domain_1d, n_ranks_along_dim, remote_coords[dim_index]);
+        global_domain_1d, n_ranks_along_dim, coord);
     auto remote_restricted_1d =
         restrict_strided_with_discrete(full_1d_strided, remote_local_1d);
     auto remote_ghost_1d = get_required_transform_domain<DimToTransform>(
@@ -71,13 +76,35 @@ compute_peer_exchanges(
         ddc::select<DimToTransform>(minimum_level),
         ddc::select<DimToTransform>(maximum_level), wavelet_name);
 
-    // Keep only the indices that fall in our local domain
+    std::vector<DElem1d> needed;
     ddc::host_for_each(remote_ghost_1d, [&](DElem1d elem) {
       if (local_domain_1d.contains(elem)) {
-        peer.indices_they_need.push_back(elem);
+        needed.push_back(elem);
       }
     });
+    if (!needed.empty()) {
+      they_need_from_us[remote_rank] = std::move(needed);
+    }
+  }
 
+  // Merge: for each rank that appears in ghost_by_rank OR
+  // they_need_from_us, create a peer entry
+  std::set<int> all_peer_ranks;
+  for (auto &[rank, _] : ghost_by_rank)
+    all_peer_ranks.insert(rank);
+  for (auto &[rank, _] : they_need_from_us)
+    all_peer_ranks.insert(rank);
+
+  std::vector<PeerExchange<DElem1d>> peers;
+  for (int remote_rank : all_peer_ranks) {
+    PeerExchange<DElem1d> peer;
+    peer.remote_rank = remote_rank;
+    if (ghost_by_rank.count(remote_rank)) {
+      peer.indices_we_need = std::move(ghost_by_rank[remote_rank]);
+    }
+    if (they_need_from_us.count(remote_rank)) {
+      peer.indices_they_need = std::move(they_need_from_us[remote_rank]);
+    }
     peers.push_back(std::move(peer));
   }
 
@@ -142,35 +169,57 @@ void exchange_ghost_slices(
     return displacements;
   };
 
+  // Post all sends and receives non-blocking, then wait.
+  // This avoids deadlocks when ranks have different peer orderings.
+  std::vector<MPI_Request> requests;
+  std::vector<MPI_Datatype> types_to_free;
+  requests.reserve(peers.size() * 2);
+  types_to_free.reserve(peers.size() * 2);
+
   for (auto &peer : peers) {
-    auto send_displacements =
-        build_displacements(local_grid, peer.indices_they_need);
+    // Receive type
     auto recv_displacements =
         build_displacements(extended_span, peer.indices_we_need);
-
-    int send_count = static_cast<int>(send_displacements.size());
     int recv_count = static_cast<int>(recv_displacements.size());
-
-    std::vector<int> send_blocklens(send_count, 1);
-    MPI_Datatype send_type;
-    MPI_Type_create_hindexed(send_count, send_blocklens.data(),
-                             send_displacements.data(), mpi_value_type,
-                             &send_type);
-    MPI_Type_commit(&send_type);
-
     std::vector<int> recv_blocklens(recv_count, 1);
     MPI_Datatype recv_type;
     MPI_Type_create_hindexed(recv_count, recv_blocklens.data(),
                              recv_displacements.data(), mpi_value_type,
                              &recv_type);
     MPI_Type_commit(&recv_type);
+    types_to_free.push_back(recv_type);
 
-    MPI_Sendrecv(local_grid.data_handle(), 1, send_type, peer.remote_rank, 20,
-                 extended_span.data_handle(), 1, recv_type, peer.remote_rank,
-                 20, cart_comm, MPI_STATUS_IGNORE);
+    MPI_Request req;
+    MPI_Irecv(extended_span.data_handle(), 1, recv_type, peer.remote_rank, 20,
+              cart_comm, &req);
+    requests.push_back(req);
+  }
 
-    MPI_Type_free(&send_type);
-    MPI_Type_free(&recv_type);
+  for (auto &peer : peers) {
+    // Send type
+    auto send_displacements =
+        build_displacements(local_grid, peer.indices_they_need);
+    int send_count = static_cast<int>(send_displacements.size());
+    std::vector<int> send_blocklens(send_count, 1);
+    MPI_Datatype send_type;
+    MPI_Type_create_hindexed(send_count, send_blocklens.data(),
+                             send_displacements.data(), mpi_value_type,
+                             &send_type);
+    MPI_Type_commit(&send_type);
+    types_to_free.push_back(send_type);
+
+    MPI_Request req;
+    MPI_Isend(local_grid.data_handle(), 1, send_type, peer.remote_rank, 20,
+              cart_comm, &req);
+    requests.push_back(req);
+  }
+
+  std::vector<MPI_Status> statuses(requests.size());
+  MPI_Waitall(static_cast<int>(requests.size()), requests.data(),
+              statuses.data());
+
+  for (auto &t : types_to_free) {
+    MPI_Type_free(&t);
   }
 }
 
