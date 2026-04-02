@@ -472,6 +472,12 @@ void test_distributed_combination_technique_2d() {
                                     wavelet, cart_comm, instances[0]);
   paliwa::fence_all_instances(instances);
 
+  // Dump combined result per rank
+  paliwa::dump_chunk_span_to_binary_file(
+      cs, "distributed_full_grid_" + std::to_string(maximum_level[0]) + "_" +
+              std::to_string(maximum_level[1]) + "_2d_rank" +
+              std::to_string(world_rank) + ".raw");
+
   double local_sum = 0.0;
   ddc::host_for_each(local_max, [&](DElem e) { local_sum += cs(e); });
   double global_sum = 0.0;

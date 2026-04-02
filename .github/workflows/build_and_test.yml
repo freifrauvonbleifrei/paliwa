@@ -51,6 +51,7 @@ jobs:
         EOF
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
+        spack --env ddc-env add python-pip  # for postprocessing
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
@@ -92,3 +93,26 @@ jobs:
         mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
+    - name: Postprocess combination technique results
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        cd build
+        # Generate serial raw files
+        mpiexec --oversubscribe -n 1 ./test/paliwa_tests --gtest_filter='combination_technique.full_integration_2d'
+        # Generate distributed raw files
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
+        # Visualize
+        pip install matplotlib numpy
+        python3 ../paliwa/postprocess.py
+        python3 ../paliwa/postprocess.py --distributed 2 2
+    - name: Upload combination technique plots
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: combination-technique-plots
+        path: |
+          build/combination_scheme.png
+          build/combination_scheme_distributed.png
