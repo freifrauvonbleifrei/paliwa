@@ -15,6 +15,7 @@
 
 #include "../paliwa/paliwa_dimensions.hpp"
 #include "../paliwa/paliwa_distribute.hpp"
+#include "../paliwa/paliwa_distributed_transform.hpp"
 #include "../paliwa/paliwa_domains.hpp"
 #include "../paliwa/paliwa_transform.hpp"
 
@@ -154,5 +155,210 @@ void test_classify_ghost_by_rank() {
 }
 
 TEST(distributed, classify_ghost_by_rank) { test_classify_ghost_by_rank(); }
+
+void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
+  using Dim = paliwa::DDimX;
+
+  int world_size, world_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  if (world_size < 2) {
+    GTEST_SKIP() << "Need at least 2 MPI ranks";
+  }
+
+  int color = (world_rank < 2) ? 0 : MPI_UNDEFINED;
+  MPI_Comm sub_comm;
+  MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &sub_comm);
+  if (color == MPI_UNDEFINED)
+    return;
+
+  constexpr long int max_level = 7, level_val = 6, min_level = 1;
+  long int global_size = 1L << max_level;
+
+  ddc::DiscreteDomain<Dim> global_dom;
+  if (ddc::is_discrete_space_initialized<Dim>()) {
+    global_dom = ddc::DiscreteDomain<Dim>(
+        ddc::DiscreteElement<Dim>(0), ddc::DiscreteVector<Dim>(global_size));
+  } else {
+    global_dom = paliwa::initialize_dim_periodic_unit_interval<Dim>(
+        ddc::DiscreteVector<Dim>(global_size));
+  }
+
+  std::array<int, 1> par_vector = {2};
+  auto [local_dom, cart_comm] = paliwa::decompose_domain_on_communicator(
+      global_dom, sub_comm, par_vector);
+
+  using DVect = ddc::DiscreteVector<Dim>;
+  DVect level_v(std::array<long int, 1>{level_val});
+  DVect min_level_v(std::array<long int, 1>{min_level});
+  DVect max_level_v(std::array<long int, 1>{max_level});
+
+  auto full_strided = paliwa::strided_domain_from_level<Dim>(
+      ddc::detail::array(level_v), ddc::detail::array(max_level_v));
+  auto local_strided =
+      paliwa::restrict_strided_with_discrete(full_strided, local_dom);
+
+  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
+  auto local_span = local_chunk.span_view();
+  ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
+  auto orig_span = orig_chunk.span_view();
+
+  ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> elem) {
+    local_span(elem) = std::sin(2.0 * pi_dist * ddc::coordinate(elem));
+    orig_span(elem) = local_span(elem);
+  });
+
+  // Serial reference on rank 0
+  ddc::Chunk serial_chunk("serial", full_strided, ddc::HostAllocator<double>());
+  auto serial_span = serial_chunk.span_view();
+  {
+    int n = static_cast<int>(local_strided.size());
+    std::vector<double> vals(n);
+    size_t idx = 0;
+    ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+      vals[idx++] = local_span(e);
+    });
+    if (world_rank == 0) {
+      idx = 0;
+      ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+        serial_span(e) = vals[idx++];
+      });
+      std::vector<double> remote(n);
+      MPI_Recv(remote.data(), n, MPI_DOUBLE, 1, 99, sub_comm,
+               MPI_STATUS_IGNORE);
+      idx = 0;
+      ddc::host_for_each(
+          paliwa::restrict_strided_with_discrete(
+              full_strided,
+              paliwa::get_rank_local_domain_along_dim<Dim>(global_dom, 2, 1)),
+          [&](ddc::DiscreteElement<Dim> e) { serial_span(e) = remote[idx++]; });
+    } else {
+      MPI_Send(vals.data(), n, MPI_DOUBLE, 0, 99, sub_comm);
+    }
+  }
+  if (world_rank == 0) {
+    paliwa::hierarchize(serial_span, level_v, min_level_v, max_level_v,
+                        wavelet_name, Kokkos::DefaultHostExecutionSpace());
+  }
+
+  paliwa::distributed_hierarchize(
+      local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
+      cart_comm, Kokkos::DefaultHostExecutionSpace());
+
+  // Compare with serial
+  {
+    int n = static_cast<int>(local_strided.size());
+    std::vector<double> vals(n);
+    size_t idx = 0;
+    ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+      vals[idx++] = local_span(e);
+    });
+    if (world_rank == 0) {
+      idx = 0;
+      ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+        EXPECT_NEAR(vals[idx++], serial_span(e), 1e-12);
+      });
+      std::vector<double> remote(n);
+      MPI_Recv(remote.data(), n, MPI_DOUBLE, 1, 100, sub_comm,
+               MPI_STATUS_IGNORE);
+      idx = 0;
+      ddc::host_for_each(
+          paliwa::restrict_strided_with_discrete(
+              full_strided,
+              paliwa::get_rank_local_domain_along_dim<Dim>(global_dom, 2, 1)),
+          [&](ddc::DiscreteElement<Dim> e) {
+            EXPECT_NEAR(remote[idx++], serial_span(e), 1e-12);
+          });
+    } else {
+      MPI_Send(vals.data(), n, MPI_DOUBLE, 0, 100, sub_comm);
+    }
+  }
+
+  paliwa::distributed_dehierarchize(
+      local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
+      cart_comm, Kokkos::DefaultHostExecutionSpace());
+
+  ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+    EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
+  });
+
+  MPI_Comm_free(&cart_comm);
+  MPI_Comm_free(&sub_comm);
+}
+
+void roundtrip_1d_hat() { test_distributed_roundtrip_1d("hat"); }
+void roundtrip_1d_bio() { test_distributed_roundtrip_1d("biorthogonal"); }
+void roundtrip_1d_fw() { test_distributed_roundtrip_1d("fullweighting"); }
+TEST(distributed, roundtrip_1d_hat) { roundtrip_1d_hat(); }
+TEST(distributed, roundtrip_1d_biorthogonal) { roundtrip_1d_bio(); }
+TEST(distributed, roundtrip_1d_fullweighting) { roundtrip_1d_fw(); }
+
+void distributed_roundtrip_2d_all_wavelets() {
+  using DimX = paliwa::DDimY;
+  using DimY = paliwa::DDimZ;
+  using DElem = ddc::DiscreteElement<DimX, DimY>;
+  using DVect = ddc::DiscreteVector<DimX, DimY>;
+
+  int world_size, world_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  if (world_size < 4) {
+    GTEST_SKIP() << "Need at least 4 ranks";
+  }
+
+  int color = (world_rank < 4) ? 0 : MPI_UNDEFINED;
+  MPI_Comm sub_comm;
+  MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &sub_comm);
+  if (color == MPI_UNDEFINED)
+    return;
+
+  DVect resolution(std::array<long int, 2>{1L << 6, 1L << 7});
+  auto global_dom =
+      paliwa::optional_initialize_dims_periodic_unit_cube(resolution);
+
+  std::array<int, 2> par_vector = {2, 2};
+  auto [local_dom, cart_comm] = paliwa::decompose_domain_on_communicator(
+      global_dom, sub_comm, par_vector);
+
+  DVect level_v(std::array<long int, 2>{5, 6});
+  DVect min_level_v(std::array<long int, 2>{1, 2});
+  DVect max_level_v(std::array<long int, 2>{6, 7});
+
+  auto full_strided = paliwa::strided_domain_from_level<DimX, DimY>(
+      ddc::detail::array(level_v), ddc::detail::array(max_level_v));
+  auto local_strided =
+      paliwa::restrict_strided_with_discrete(full_strided, local_dom);
+
+  for (auto const &wn : {"hat", "biorthogonal", "fullweighting"}) {
+    SCOPED_TRACE(wn);
+    ddc::Chunk lc("local", local_strided, ddc::HostAllocator<double>());
+    auto ls = lc.span_view();
+    ddc::Chunk oc("orig", local_strided, ddc::HostAllocator<double>());
+    auto os = oc.span_view();
+
+    ddc::host_for_each(local_strided, [&](DElem e) {
+      auto c = ddc::coordinate(e).array();
+      ls(e) = std::sin(2.0 * pi_dist * c[0]) * std::sin(2.0 * pi_dist * c[1]);
+      os(e) = ls(e);
+    });
+
+    paliwa::distributed_hierarchize(ls, full_strided, level_v, min_level_v,
+                                    max_level_v, std::string(wn), cart_comm,
+                                    Kokkos::DefaultHostExecutionSpace());
+    paliwa::distributed_dehierarchize(ls, full_strided, level_v, min_level_v,
+                                      max_level_v, std::string(wn), cart_comm,
+                                      Kokkos::DefaultHostExecutionSpace());
+
+    ddc::host_for_each(local_strided,
+                       [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
+  }
+
+  MPI_Comm_free(&cart_comm);
+  MPI_Comm_free(&sub_comm);
+}
+
+TEST(distributed, roundtrip_2d_all_wavelets) {
+  distributed_roundtrip_2d_all_wavelets();
+}
 
 #endif // PALIWA_WITH_MPI
