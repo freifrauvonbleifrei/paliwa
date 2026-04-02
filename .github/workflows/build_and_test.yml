@@ -71,10 +71,24 @@ jobs:
           cmake -DPALIWA_BUILD_TESTS=ON -DPALIWA_WITH_MPI=OFF -B build
         fi
         cmake --build ./build/ --config ${{ matrix.build_type }}
-    - name: Run tests
+    - name: Run tests (serial)
       shell: spack-bash {0}
       run: |
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
         cd build
-        ./test/paliwa_tests        
+        if [ "${{ matrix.mpi }}" == "yes" ]; then
+          mpiexec --oversubscribe -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
+        else
+          ./test/paliwa_tests
+        fi
+    - name: Run distributed tests (MPI only)
+      if: matrix.mpi == 'yes'
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        cd build
+        mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
