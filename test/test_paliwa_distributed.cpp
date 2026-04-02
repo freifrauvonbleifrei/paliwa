@@ -14,7 +14,6 @@
 #include <ddc/ddc.hpp>
 
 #include "../paliwa/paliwa_dimensions.hpp"
-#include "../paliwa/paliwa_distributed_transform.hpp"
 #include "../paliwa/paliwa_domains.hpp"
 #include "../paliwa/paliwa_transform.hpp"
 
