@@ -41,8 +41,14 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
-        spack config add "packages:gcc-runtime:externals:[{spec: 'gcc-runtime@14.2.0', prefix: /usr}]" #TODO derive version automagically
-        spack config add "packages:gcc-runtime:buildable:false"
+        #TODO derive gcc-runtime version automagically
+        cat >> spack/etc/spack/packages.yaml << 'EOF'
+          gcc-runtime:
+            externals:
+            - spec: gcc-runtime@14.2.0
+              prefix: /usr
+            buildable: false
+        EOF
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add googletest
