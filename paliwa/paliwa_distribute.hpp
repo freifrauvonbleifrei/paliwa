@@ -4,11 +4,10 @@
 
 #pragma once
 
-#include <numeric>
-#include <vector>
-
 #include <Kokkos_Core.hpp>
 #include <ddc/ddc.hpp>
+#include <numeric>
+#include <vector>
 
 #ifdef PALIWA_WITH_MPI
 #include <mpi.h>

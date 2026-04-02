@@ -4,12 +4,11 @@
 
 #pragma once
 
-#include <ranges>
-#include <vector>
-
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Random.hpp>
 #include <ddc/ddc.hpp>
+#include <ranges>
+#include <vector>
 
 #include "paliwa_domains.hpp"
 #include "paliwa_wavelets.hpp"
@@ -165,7 +164,6 @@ constexpr void hierarchize(ChunkSpanType const strided_grid,
                            ddc::DiscreteVector<DDims...> const &maximum_level,
                            std::string const &wavelet_name = "hat",
                            ExecSpace instance = ExecSpace()) {
-
   // fold expression to call for every dimension
   [[maybe_unused]] bool unused =
       (hierarchize_in<DDims>(strided_grid, level, minimum_level, maximum_level,
@@ -182,7 +180,6 @@ constexpr void dehierarchize(ChunkSpanType const strided_grid,
                              ddc::DiscreteVector<DDims...> const &maximum_level,
                              std::string const &wavelet_name = "hat",
                              ExecSpace instance = ExecSpace()) {
-
   // fold expression to call for every dimension
   [[maybe_unused]] bool unused =
       (dehierarchize_in<DDims>(strided_grid, level, minimum_level,

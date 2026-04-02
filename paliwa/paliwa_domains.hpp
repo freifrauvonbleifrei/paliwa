@@ -4,9 +4,8 @@
 
 #pragma once
 
-#include <vector>
-
 #include <ddc/ddc.hpp>
+#include <vector>
 
 namespace paliwa {
 

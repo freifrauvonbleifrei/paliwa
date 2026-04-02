@@ -4,10 +4,9 @@
 
 #pragma once
 
-#include <fstream>
-
 #include <Kokkos_Core.hpp>
 #include <ddc/ddc.hpp>
+#include <fstream>
 
 namespace paliwa {
 
