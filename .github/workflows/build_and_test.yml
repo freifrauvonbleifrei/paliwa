@@ -75,5 +75,6 @@ jobs:
       shell: spack-bash {0}
       run: |
         spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
         cd build
         ./test/paliwa_tests        
