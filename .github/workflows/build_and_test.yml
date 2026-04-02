@@ -42,7 +42,7 @@ jobs:
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
         spack env create ddc-env
-        spack --env ddc-env add ddc@main -splines -fft #...+cuda cuda_arch=...
+        spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
