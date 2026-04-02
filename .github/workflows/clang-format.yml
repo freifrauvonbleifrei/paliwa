@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
     - name: Install clang-format
-      run: pip install clang-format
+      run: pip install clang-format==19.1.7
     - name: Check formatting
       run: |
         find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) \
