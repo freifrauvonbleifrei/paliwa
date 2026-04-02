@@ -36,14 +36,14 @@ double sinusoid_integral_analytical(int d) {
   return std::pow(2.0 / pi, d);
 }
 
-template <typename... DDims>
+template <typename InstancesType, typename... DDims>
 std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
                        ddc::DeviceAllocator<double>>>
 initialize_combination_scheme(
     std::vector<ddc::StridedDiscreteDomain<DDims...>> const
         &component_grid_domains,
     std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
-    std::vector<Kokkos::DefaultExecutionSpace> const &instances) {
+    InstancesType const &instances) {
   using DElem = ddc::DiscreteElement<DDims...>;
 
   std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
@@ -71,10 +71,9 @@ initialize_combination_scheme(
   return level_data;
 }
 
-template <typename... DDims>
-void run_combination_technique(
-    std::vector<Kokkos::DefaultExecutionSpace> const &instances,
-    paliwa::MPICommType comm) {
+template <typename... DDims, typename InstancesType>
+void run_combination_technique(InstancesType const &instances,
+                               paliwa::MPICommType comm) {
   constexpr size_t dimensionality = sizeof...(DDims);
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   using DElem = SDDom::discrete_element_type;
@@ -348,10 +347,9 @@ void run_combination_technique(
   EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.031);
 }
 
-template <size_t dimensionality>
-void run_combination_technique_in_dimensions(
-    std::vector<Kokkos::DefaultExecutionSpace> const &instances,
-    paliwa::MPICommType comm) {
+template <size_t dimensionality, typename InstancesType>
+void run_combination_technique_in_dimensions(InstancesType const &instances,
+                                             paliwa::MPICommType comm) {
   if constexpr (dimensionality == 2) {
     run_combination_technique<paliwa::DDimA, paliwa::DDimB>(instances, comm);
   } else if constexpr (dimensionality == 3) {
@@ -370,12 +368,10 @@ TEST(combination_technique, full_integration_2d) {
   auto instances = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
-
   run_combination_technique_in_dimensions<2>(instances, MPI_COMM_WORLD);
 }
 
 TEST(combination_technique, full_integration_3d) {
-  // use up to 32 concurrent streams
   auto instances = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
@@ -383,7 +379,6 @@ TEST(combination_technique, full_integration_3d) {
 }
 
 TEST(combination_technique, full_integration_4d) {
-  // use up to 32 concurrent streams
   auto instances = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
