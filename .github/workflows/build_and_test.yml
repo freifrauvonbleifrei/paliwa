@@ -51,7 +51,7 @@ jobs:
         EOF
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
-        spack --env ddc-env add python-pip  # for postprocessing
+        spack --env ddc-env add py-pip  # for postprocessing
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
