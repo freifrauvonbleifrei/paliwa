@@ -128,4 +128,116 @@ decompose_domain_on_communicator(
 #endif // PALIWA_WITH_MPI
 }
 
+/**
+ * @brief Get the 1D local domain owned by a given Cartesian coordinate along a
+ * dimension. Assumes uniform partition of the global domain.
+ */
+template <typename Dim>
+constexpr ddc::DiscreteDomain<Dim> get_rank_local_domain_along_dim(
+    ddc::DiscreteDomain<Dim> const &global_domain_1d, int n_ranks,
+    int rank_coord) {
+  assert(n_ranks > 0);
+  assert(rank_coord >= 0 && rank_coord < n_ranks);
+  auto global_size = static_cast<long int>(global_domain_1d.size());
+  assert(global_size % n_ranks == 0);
+  long int chunk_size = global_size / n_ranks;
+  ddc::DiscreteElement<Dim> start(
+      global_domain_1d.front() +
+      ddc::DiscreteVector<Dim>(rank_coord * chunk_size));
+  return ddc::DiscreteDomain<Dim>(start, ddc::DiscreteVector<Dim>(chunk_size));
+}
+
+/**
+ * @brief Classify ghost indices by owner coordinate along a dimension.
+ *
+ * @return Map from owner coordinate (0-based) to list of ghost indices.
+ */
+template <typename Dim>
+std::map<int, std::vector<ddc::DiscreteElement<Dim>>>
+classify_ghost_by_coord(ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
+                        ddc::DiscreteDomain<Dim> const &global_domain_1d,
+                        int n_ranks_along_dim) {
+  auto global_size = static_cast<long int>(global_domain_1d.size());
+  long int chunk_size = global_size / n_ranks_along_dim;
+  long int global_front = global_domain_1d.front().template uid<Dim>();
+
+  std::map<int, std::vector<ddc::DiscreteElement<Dim>>> result;
+
+  ddc::host_for_each(ghost_domain, [&](ddc::DiscreteElement<Dim> elem) {
+    long int global_idx = elem.template uid<Dim>() - global_front;
+    global_idx = ((global_idx % global_size) + global_size) % global_size;
+    int owner_coord = static_cast<int>(global_idx / chunk_size);
+    if (owner_coord >= n_ranks_along_dim) {
+      owner_coord = n_ranks_along_dim - 1;
+    }
+    result[owner_coord].push_back(elem);
+  });
+
+  return result;
+}
+
+#ifdef PALIWA_WITH_MPI
+
+template <typename T> struct MPIValueType {
+  MPI_Datatype type;
+  bool owned;
+
+  MPIValueType() {
+    if constexpr (std::is_same_v<T, double>) {
+      type = MPI_DOUBLE;
+      owned = false;
+    } else if constexpr (std::is_same_v<T, float>) {
+      type = MPI_FLOAT;
+      owned = false;
+    } else {
+      MPI_Type_contiguous(sizeof(T), MPI_BYTE, &type);
+      MPI_Type_commit(&type);
+      owned = true;
+    }
+  }
+
+  ~MPIValueType() {
+    if (owned)
+      MPI_Type_free(&type);
+  }
+
+  MPIValueType(MPIValueType const &) = delete;
+  MPIValueType &operator=(MPIValueType const &) = delete;
+
+  operator MPI_Datatype() const { return type; }
+};
+
+/**
+ * @brief Classify ghost indices by owner MPI rank along a Cartesian dimension.
+ *
+ * Thin wrapper around classify_ghost_by_coord that converts Cartesian
+ * coordinates to MPI ranks.
+ */
+template <typename Dim>
+std::map<int, std::vector<ddc::DiscreteElement<Dim>>>
+classify_ghost_by_rank(ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
+                       ddc::DiscreteDomain<Dim> const &global_domain_1d,
+                       MPI_Comm cart_comm, int dim_index) {
+  int n_dims = 0;
+  MPI_Cartdim_get(cart_comm, &n_dims);
+  std::vector<int> dims(n_dims), periods(n_dims), my_coords(n_dims);
+  MPI_Cart_get(cart_comm, n_dims, dims.data(), periods.data(),
+               my_coords.data());
+
+  auto by_coord = classify_ghost_by_coord<Dim>(ghost_domain, global_domain_1d,
+                                               dims[dim_index]);
+
+  std::map<int, std::vector<ddc::DiscreteElement<Dim>>> result;
+  for (auto &[coord, indices] : by_coord) {
+    std::vector<int> target_coords(my_coords);
+    target_coords[dim_index] = coord;
+    int target_rank = -1;
+    MPI_Cart_rank(cart_comm, target_coords.data(), &target_rank);
+    result[target_rank] = std::move(indices);
+  }
+  return result;
+}
+
+#endif // PALIWA_WITH_MPI
+
 } // namespace paliwa
