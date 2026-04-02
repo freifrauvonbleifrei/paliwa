@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+#
+# SPDX-License-Identifier: CC-BY-4.0
+
+name: clang-format
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  format:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+    - name: Install clang-format
+      run: pip install clang-format
+    - name: Check formatting
+      run: |
+        find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) \
+          -exec clang-format --dry-run --Werror {} +

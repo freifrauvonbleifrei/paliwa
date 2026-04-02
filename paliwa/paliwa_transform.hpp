@@ -89,9 +89,12 @@ transform_in(ChunkSpanType const strided_grid,
               return;
             }
             using value_type = std::decay_t<decltype(strided_grid(ixyz))>;
-            strided_grid(ixyz) = static_cast<value_type>(filter[0]) * strided_grid(lower_element) +
-                                 static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
-                                 static_cast<value_type>(filter[2]) * strided_grid(upper_element);
+            strided_grid(ixyz) =
+                static_cast<value_type>(filter[0]) *
+                    strided_grid(lower_element) +
+                static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
+                static_cast<value_type>(filter[2]) *
+                    strided_grid(upper_element);
           });
     }
   }
