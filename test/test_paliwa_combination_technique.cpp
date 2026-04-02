@@ -19,11 +19,12 @@
 
 #include <ddc/ddc.hpp>
 
-#include "Kokkos_UnorderedMap.hpp"
 #include <Kokkos_Core.hpp>
+#include <Kokkos_UnorderedMap.hpp>
 
 #include "../paliwa/paliwa_dimensions.hpp"
 #include "../paliwa/paliwa_distribute.hpp"
+#include "../paliwa/paliwa_distributed_transform.hpp"
 #include "../paliwa/paliwa_domains.hpp"
 #include "../paliwa/paliwa_io.hpp"
 #include "../paliwa/paliwa_transform.hpp"
@@ -97,15 +98,6 @@ void run_combination_technique(InstancesType const &instances,
       paliwa::optional_initialize_dims_periodic_unit_cube<DDims...>(
           resolution_all);
 
-#ifdef PALIWA_WITH_MPI
-  std::array<int, dimensionality> parallelization_vector;
-  std::fill(parallelization_vector.begin(), parallelization_vector.end(), 1);
-  auto const [local_domain, cartesian_comm] =
-      paliwa::decompose_domain_on_communicator(dom_all, comm,
-                                               parallelization_vector);
-  // TODO use to compute only on parts of domain
-#endif
-
   std::array<long int, dimensionality> minimum_level;
   std::vector<std::array<long int, dimensionality>> all_levels;
   std::vector<double> all_combi_coefficients;
@@ -172,7 +164,6 @@ void run_combination_technique(InstancesType const &instances,
   // hierarchize / wavelet-ify / filter in each direction
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
     DVect level(all_levels[grid_index]);
-    SDDom const &strided_domain = component_grid_domains[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
     paliwa::hierarchize(strided_grid, level, ddc_minimum_level,
@@ -384,3 +375,117 @@ TEST(combination_technique, full_integration_4d) {
       1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
   run_combination_technique_in_dimensions<4>(instances, MPI_COMM_WORLD);
 }
+
+#ifdef PALIWA_WITH_MPI
+
+void test_distributed_combination_technique_2d() {
+  using DimX = paliwa::DDimR;
+  using DimY = paliwa::DDimS;
+  using SDDom = ddc::StridedDiscreteDomain<DimX, DimY>;
+  using DElem = ddc::DiscreteElement<DimX, DimY>;
+  using DVect = ddc::DiscreteVector<DimX, DimY>;
+
+  int world_size, world_rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  if (world_size < 4) {
+    GTEST_SKIP() << "Need at least 4 ranks";
+  }
+
+  int color = (world_rank < 4) ? 0 : MPI_UNDEFINED;
+  MPI_Comm sub_comm;
+  MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &sub_comm);
+  if (color == MPI_UNDEFINED)
+    return;
+
+  std::array<long int, 2> maximum_level = {6, 7};
+  std::array<long int, 2> minimum_level = {2, 3};
+  std::vector<std::array<long int, 2>> all_levels = {
+      {2, 7}, {3, 6}, {4, 5}, {5, 4}, {6, 3}, {2, 6}, {3, 5}, {4, 4}, {5, 3}};
+  std::vector<double> all_coefficients = {1, 1, 1, 1, 1, -1, -1, -1, -1};
+
+  DVect resolution(std::array<long int, 2>{1L << 6, 1L << 7});
+  auto global_dom =
+      paliwa::optional_initialize_dims_periodic_unit_cube(resolution);
+
+  std::array<int, 2> par_vector = {2, 2};
+  auto [local_dom, cart_comm] = paliwa::decompose_domain_on_communicator(
+      global_dom, sub_comm, par_vector);
+
+  DVect ddc_min(minimum_level), ddc_max(maximum_level);
+  std::string const wavelet = "biorthogonal";
+
+  auto instances_arr = Kokkos::Experimental::partition_space(
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1);
+  std::vector<Kokkos::DefaultExecutionSpace> instances(instances_arr.begin(),
+                                                       instances_arr.end());
+
+  std::vector<SDDom> full_doms, local_doms;
+  for (auto const &lv : all_levels) {
+    auto f = paliwa::strided_domain_from_level<DimX, DimY>(lv, maximum_level);
+    full_doms.push_back(f);
+    local_doms.push_back(paliwa::restrict_strided_with_discrete(f, local_dom));
+  }
+
+  using ChunkType = ddc::Chunk<double, SDDom, ddc::HostAllocator<double>>;
+  std::vector<ChunkType> grids;
+  for (size_t i = 0; i < all_levels.size(); ++i) {
+    grids.emplace_back("g" + std::to_string(i), local_doms[i],
+                       ddc::HostAllocator<double>());
+    auto s = grids.back().span_view();
+    ddc::host_for_each(local_doms[i], [&](DElem e) {
+      auto c = ddc::coordinate(e).array();
+      s(e) = std::sin(pi * c[0]) * std::sin(pi * c[1]);
+    });
+    // Dump component grid before hierarchization
+    std::string level_str;
+    for (auto l : all_levels[i]) {
+      level_str += std::to_string(l) + "_";
+    }
+    level_str += "2d";
+    paliwa::dump_chunk_span_to_binary_file(
+        s, "distributed_grid_" + level_str + "_rank" +
+               std::to_string(world_rank) + ".raw");
+
+    DVect lv(all_levels[i]);
+    paliwa::distributed_hierarchize(s, full_doms[i], lv, ddc_min, ddc_max,
+                                    wavelet, cart_comm,
+                                    instances[i % instances.size()]);
+  }
+  paliwa::fence_all_instances(instances);
+
+  auto full_max = paliwa::strided_domain_from_level<DimX, DimY>(maximum_level,
+                                                                maximum_level);
+  auto local_max = paliwa::restrict_strided_with_discrete(full_max, local_dom);
+
+  ddc::Chunk combined("combined", local_max, ddc::HostAllocator<double>());
+  auto cs = combined.span_view();
+  ddc::host_for_each(local_max, [&](DElem e) { cs(e) = 0.0; });
+
+  for (size_t i = 0; i < all_levels.size(); ++i) {
+    double coeff = all_coefficients[i];
+    auto gs = grids[i].span_cview();
+    ddc::host_for_each(local_doms[i], [&](DElem e) { cs(e) += coeff * gs(e); });
+  }
+
+  paliwa::distributed_dehierarchize(cs, full_max, ddc_max, ddc_min, ddc_max,
+                                    wavelet, cart_comm, instances[0]);
+  paliwa::fence_all_instances(instances);
+
+  double local_sum = 0.0;
+  ddc::host_for_each(local_max, [&](DElem e) { local_sum += cs(e); });
+  double global_sum = 0.0;
+  MPI_Allreduce(&local_sum, &global_sum, 1, MPI_DOUBLE, MPI_SUM, cart_comm);
+
+  EXPECT_NEAR(global_sum / static_cast<double>(full_max.size()),
+              sinusoid_integral_analytical(2), 0.031);
+
+  MPI_Comm_free(&cart_comm);
+  MPI_Comm_free(&sub_comm);
+}
+
+TEST(combination_technique, distributed_2d) {
+  test_distributed_combination_technique_2d();
+}
+
+#endif // PALIWA_WITH_MPI
