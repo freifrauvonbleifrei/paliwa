@@ -17,16 +17,19 @@ jobs:
     - name: Install clang-format
       run: pip install clang-format==19.1.7
     - name: Check formatting
+      shell: bash
       run: |
-        set -x
+        set -euo pipefail
+        echo "--- clang-format info ---"
         which clang-format
         clang-format --version
         cat .clang-format
-        echo "--- Files to check ---"
-        find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) | sort
-        echo "--- Running clang-format ---"
-        find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) \
-          -exec clang-format --dry-run --Werror --verbose {} +
         echo "--- Diff check ---"
-        find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) -print0 | \
-          xargs -0 -I{} sh -c 'diff -u "{}" <(clang-format "{}") || exit 1'
+        status=0
+        for f in $(find paliwa/ test/ \( -name '*.hpp' -o -name '*.cpp' \) | sort); do
+          if ! diff -u "$f" <(clang-format "$f"); then
+            echo "FAIL: $f needs formatting"
+            status=1
+          fi
+        done
+        exit $status
