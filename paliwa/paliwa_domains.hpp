@@ -10,6 +10,19 @@
 
 namespace paliwa {
 
+template <typename DimToReplace, typename... DDims>
+constexpr auto replace_dim(ddc::DiscreteElement<DDims...> base,
+                           ddc::DiscreteElement<DimToReplace> d_elem) {
+  /// Replace one dimension's component in a multi-D DiscreteElement
+  return ddc::DiscreteElement<DDims...>([&]() -> ddc::DiscreteElement<DDims> {
+    if constexpr (std::is_same_v<DDims, DimToReplace>) {
+      return ddc::DiscreteElement<DDims>(d_elem);
+    } else {
+      return ddc::select<DDims>(base);
+    }
+  }()...);
+}
+
 template <typename... DDims>
 constexpr ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
     std::array<long int, sizeof...(DDims)> const &level,
@@ -287,9 +300,9 @@ template <typename... DDims,
 ddc::SparseDiscreteDomain<DDims...> union_of_sparse_domains(
     ddc::SparseDiscreteDomain<DDims...> const &first_sparse_domain,
     ddc::SparseDiscreteDomain<DDims...> const &second_sparse_domain) {
-  return ddc::SparseDiscreteDomain<DDims...>(
-      union_of_sparse_domains(ddc::SparseDiscreteDomain<DDims>(first_sparse_domain),
-                              ddc::SparseDiscreteDomain<DDims>(second_sparse_domain))...);
+  return ddc::SparseDiscreteDomain<DDims...>(union_of_sparse_domains(
+      ddc::SparseDiscreteDomain<DDims>(first_sparse_domain),
+      ddc::SparseDiscreteDomain<DDims>(second_sparse_domain))...);
 }
 
 } // namespace paliwa
