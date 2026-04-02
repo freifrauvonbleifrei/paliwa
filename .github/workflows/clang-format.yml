@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
     - name: Install clang-format
-      run: pip install clang-format==20.1.1
+      run: pip install clang-format==19.1.7
     - name: Check formatting
       shell: bash
       run: |
