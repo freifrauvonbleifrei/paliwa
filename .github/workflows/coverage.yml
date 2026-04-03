@@ -65,8 +65,11 @@ jobs:
       run: |
         lcov --capture --directory build --output-file coverage.info \
           --ignore-errors mismatch,mismatch
-        # Keep only paliwa source (exclude system, spack, test, ddc headers)
-        lcov --extract coverage.info '*/paliwa/paliwa/*' --output-file coverage_filtered.info \
+        # Remove everything except paliwa library sources
+        lcov --remove coverage.info \
+          '*/test/*' '*/spack/*' '/usr/*' '*/gtest/*' '*/Kokkos*' '*/ddc/*' \
+          '*/desul/*' '*/experimental/*' '*/impl/*' '*/View/*' '*/Serial/*' \
+          --output-file coverage_filtered.info \
           --ignore-errors unused,unused
         lcov --list coverage_filtered.info
     - name: Generate coverage percentage and badge
