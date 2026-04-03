@@ -33,7 +33,7 @@ jobs:
     - name: Install system dependencies
       run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc gfortran flang python3 #todo gfortran/flang may not be necessary for must
+          sudo apt-get install -y cmake gcc gfortran python3
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
@@ -41,15 +41,21 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
-        #TODO derive gcc-runtime version automagically
-        cat >> spack/etc/spack/packages.yaml << 'EOF'
+        # Register gcc with Fortran support and gcc-runtime as externals
+        GCC_VER=$(gcc -dumpversion)
+        cat >> spack/etc/spack/packages.yaml << EOF
           gcc-runtime:
             externals:
-            - spec: gcc-runtime@14.2.0
+            - spec: gcc-runtime@${GCC_VER}
+              prefix: /usr
+            buildable: false
+          gcc:
+            externals:
+            - spec: gcc@${GCC_VER} languages='c,c++,fortran'
               prefix: /usr
             buildable: false
         EOF
-        # Overlay patched MUST package with optional Fortran variant
+        # Overlay patched MUST package
         # TODO remove once upstreamed
         BUILTIN_REPO=$(spack location --repo builtin)
         mkdir -p "${BUILTIN_REPO}/packages/must"
