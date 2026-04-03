@@ -47,7 +47,7 @@ jobs:
         BUILTIN_REPO=$(spack location --repo builtin)
         curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
           -o "${BUILTIN_REPO}/packages/must/package.py"
-        spack config add "concretizer:unify:false"
+        spack config add "concretizer:unify:when_possible"
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
