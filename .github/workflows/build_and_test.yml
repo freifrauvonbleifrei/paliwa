@@ -55,7 +55,7 @@ jobs:
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
-          spack --env ddc-env add must
+          spack --env ddc-env add must~backward
         fi
         spack --env ddc-env add py-pip
         echo "=== Concretized specs ==="
