@@ -45,7 +45,6 @@ jobs:
         # Overlay patched MUST package
         # TODO remove once upstreamed
         BUILTIN_REPO=$(spack location --repo builtin)
-        mkdir -p "${BUILTIN_REPO}/packages/must"
         curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
           -o "${BUILTIN_REPO}/packages/must/package.py"
         spack config add "concretizer:unify:false"
@@ -55,7 +54,9 @@ jobs:
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
-          spack --env ddc-env add must~backward~tsan
+          if [ "${{ matrix.build_type }}" == "Debug" ]; then
+            spack --env ddc-env add must~backward~tsan
+          fi
         fi
         spack --env ddc-env add py-pip
         echo "=== Concretized specs ==="
@@ -106,7 +107,7 @@ jobs:
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         mpiexec --oversubscribe -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
     - name: Run MUST correctness checks (MPI only)
-      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       shell: spack-bash {0}
       run: |
         spack env activate ddc-env
@@ -128,7 +129,7 @@ jobs:
         mv MUST_Output.html must_reports/combination_technique_2d.html
         echo "MUST: all checks passed"
     - name: Upload MUST reports
-      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: must-reports
