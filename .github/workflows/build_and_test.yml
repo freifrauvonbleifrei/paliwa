@@ -33,7 +33,7 @@ jobs:
     - name: Install system dependencies
       run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc python3
+          sudo apt-get install -y cmake gcc gfortran python3
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
@@ -41,23 +41,35 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
-        #TODO derive gcc-runtime version automagically
-        cat >> spack/etc/spack/packages.yaml << 'EOF'
-          gcc-runtime:
-            externals:
-            - spec: gcc-runtime@14.2.0
-              prefix: /usr
-            buildable: false
-        EOF
+        GCC_FULL_VER=$(gcc -dumpfullversion)
+        # Overlay patched MUST package
+        # TODO remove once upstreamed
+        BUILTIN_REPO=$(spack location --repo builtin)
+        curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
+          -o "${BUILTIN_REPO}/packages/must/package.py"
+        spack config add "concretizer:unify:when_possible"
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
+          if [ "${{ matrix.build_type }}" == "Debug" ]; then
+            spack --env ddc-env add must~backward~tsan
+          fi
         fi
         spack --env ddc-env add py-pip
-        spack --env ddc-env install
+        echo "=== Concretized specs ==="
+        spack --env ddc-env concretize 2>&1
+        echo "=== Must spec details ==="
+        spack --env ddc-env find -lv must 2>&1 || true
+        echo "=== Compiler info ==="
+        spack compiler list 2>&1
+        spack compiler info gcc 2>&1 || true
+        echo "=== packages.yaml gcc entries ==="
+        spack config blame packages 2>&1 | grep -A10 'gcc@' | head -30
+        echo "=== Installing ==="
+        spack --env ddc-env install --show-log-on-error
         spack env activate ddc-env
         spack env status
     - name: Build with CMake
@@ -77,9 +89,15 @@ jobs:
       run: |
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        # Detect MPI implementation for oversubscribe flag
+        if mpiexec --version 2>&1 | grep -qi "open mpi"; then
+          MPI_RUN="mpiexec --oversubscribe"
+        else
+          MPI_RUN="mpiexec"
+        fi
         cd build
         if [ "${{ matrix.mpi }}" == "yes" ]; then
-          mpiexec --oversubscribe -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
+          $MPI_RUN -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
         else
           ./test/paliwa_tests
         fi
@@ -89,22 +107,64 @@ jobs:
       run: |
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        if mpiexec --version 2>&1 | grep -qi "open mpi"; then
+          MPI_RUN="mpiexec --oversubscribe"
+        else
+          MPI_RUN="mpiexec"
+        fi
         cd build
-        mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
-        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
-        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
-        mpiexec --oversubscribe -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
+        $MPI_RUN -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
+        $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
+        $MPI_RUN -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
+    - name: Run MUST correctness checks (MPI only)
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        cd build
+        if mpiexec --version 2>&1 | grep -qi "open mpi"; then
+          MUST_MPIEXEC="mpiexec --oversubscribe"
+        else
+          MUST_MPIEXEC="mpiexec"
+        fi
+        mkdir -p must_reports
+        spack build-env must -- mustrun --must:mpiexec "$MUST_MPIEXEC" --must:np "-n" -n 2 \
+          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/roundtrip_1d_hat.html
+        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
+          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d_all_wavelets'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/roundtrip_2d.html
+        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
+          ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/combination_technique_2d.html
+        echo "MUST: all checks passed"
+    - name: Upload MUST reports
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: must-reports
+        path: build/must_reports/
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}
       run: |
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        if mpiexec --version 2>&1 | grep -qi "open mpi"; then
+          MPI_RUN="mpiexec --oversubscribe"
+        else
+          MPI_RUN="mpiexec"
+        fi
         cd build
         # Generate serial raw files
-        mpiexec --oversubscribe -n 1 ./test/paliwa_tests --gtest_filter='combination_technique.full_integration_2d'
+        $MPI_RUN -n 1 ./test/paliwa_tests --gtest_filter='combination_technique.full_integration_2d'
         # Generate distributed raw files
-        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
+        $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
         # Visualize
         pip install matplotlib numpy
         python3 ../paliwa/postprocess.py
