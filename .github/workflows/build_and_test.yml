@@ -55,10 +55,20 @@ jobs:
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
-          spack --env ddc-env add "must %gcc@=${GCC_FULL_VER}"
+          spack --env ddc-env add must
         fi
         spack --env ddc-env add py-pip
-        spack --env ddc-env install
+        echo "=== Concretized specs ==="
+        spack --env ddc-env concretize 2>&1
+        echo "=== Must spec details ==="
+        spack --env ddc-env find -lv must 2>&1 || true
+        echo "=== Compiler info ==="
+        spack compiler list 2>&1
+        spack compiler info gcc 2>&1 || true
+        echo "=== packages.yaml gcc entries ==="
+        spack config blame packages 2>&1 | grep -A10 'gcc@' | head -30
+        echo "=== Installing ==="
+        spack --env ddc-env install --show-log-on-error
         spack env activate ddc-env
         spack env status
     - name: Build with CMake
