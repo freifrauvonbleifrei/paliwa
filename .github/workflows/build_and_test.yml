@@ -41,15 +41,7 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
-        # gcc-runtime external (gcc+gfortran already found by spack external find)
         GCC_FULL_VER=$(gcc -dumpfullversion)
-        cat >> spack/etc/spack/packages.yaml << EOF
-          gcc-runtime:
-            externals:
-            - spec: gcc-runtime@${GCC_FULL_VER}
-              prefix: /usr
-            buildable: false
-        EOF
         # Overlay patched MUST package
         # TODO remove once upstreamed
         BUILTIN_REPO=$(spack location --repo builtin)
