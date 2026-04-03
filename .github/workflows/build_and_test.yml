@@ -50,8 +50,11 @@ jobs:
             buildable: false
         EOF
         # Overlay updated MUST package recipe  #TODO remove once upstreamed
-        curl -sL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
-          -o $(spack repo list | grep builtin | awk '{print $3}')/packages/must/package.py
+        BUILTIN_REPO=$(spack location --source-dir)/var/spack/repos/builtin
+        echo "Spack builtin repo at: ${BUILTIN_REPO}"
+        mkdir -p "${BUILTIN_REPO}/packages/must"
+        curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
+          -o "${BUILTIN_REPO}/packages/must/package.py"
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
