@@ -57,14 +57,13 @@ jobs:
       run: |
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-        export OMPI_MCA_rmaps_base_oversubscribe=1
         cd build
         # Serial + non-MPI tests
         mpiexec -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
         # Distributed tests
-        mpiexec -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
-        mpiexec -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
-        mpiexec -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
+        mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
     - name: Collect coverage
       run: |
         lcov --capture --directory build --output-file coverage.info \
