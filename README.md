@@ -7,6 +7,7 @@ SPDX-License-Identifier: LGPL-3.0-or-later
 
 [![Build & Test CI](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/build_and_test.yml/)
 [![REUSE compliant](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/badge.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/licenses.yaml/)
+[![Coverage](coverage.svg)](https://github.com/freifrauvonbleifrei/paliwa/actions/workflows/coverage.yml)
 [![License: LGPL](https://img.shields.io/badge/License-LGPLv3-green.svg)](https://www.gnu.org/licenses/lgpl-3.0) TODO
 ![C++≥20](https://img.shields.io/badge/c++-%E2%89%A520-blue.svg)
 
