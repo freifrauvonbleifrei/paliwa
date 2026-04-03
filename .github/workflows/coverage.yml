@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+#
+# SPDX-License-Identifier: CC-BY-4.0
+
+name: Test coverage
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    name: Measure coverage and update badge
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+    - name: Set up Spack
+      uses: spack/setup-spack@5ab3c91bdefffffad9a7e45d1d156146afebb3a7
+      with:
+        ref: v1.1.1
+        buildcache: true
+        color: true
+        path: spack
+    - name: Install system dependencies
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc python3 lcov
+    - name: Set up ddc-env
+      shell: spack-bash {0}
+      run: |
+        spack compiler find
+        spack external find
+        spack config add "packages:cmake:buildable:false"
+        spack config add "packages:python:buildable:false"
+        spack env create ddc-env
+        spack --env ddc-env add ddc@main -splines -fft -pdi
+        spack --env ddc-env add googletest
+        spack --env ddc-env add mpi
+        spack --env ddc-env install
+        spack env activate ddc-env
+    - name: Build with coverage flags
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        cmake -DPALIWA_BUILD_TESTS=ON -DPALIWA_WITH_MPI=ON \
+          -DCMAKE_CXX_FLAGS="--coverage" -DCMAKE_EXE_LINKER_FLAGS="--coverage" \
+          -DCMAKE_BUILD_TYPE=Debug -B build
+        cmake --build build/ -j$(nproc)
+    - name: Run tests
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        export OMPI_MCA_rmaps_base_oversubscribe=1
+        cd build
+        # Serial + non-MPI tests
+        mpiexec -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
+        # Distributed tests
+        mpiexec -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
+        mpiexec -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        mpiexec -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
+    - name: Collect coverage
+      run: |
+        lcov --capture --directory build --output-file coverage.info \
+          --ignore-errors mismatch,mismatch
+        # Keep only paliwa source (exclude system, spack, test, ddc headers)
+        lcov --extract coverage.info '*/paliwa/paliwa/*' --output-file coverage_filtered.info \
+          --ignore-errors unused,unused
+        lcov --list coverage_filtered.info
+    - name: Generate coverage percentage and badge
+      id: get-coverage
+      run: |
+        cov_score=$(lcov --summary coverage_filtered.info 2>&1 | grep 'lines' | grep -oP '[\d.]+(?=%)')
+        echo "coverage=${cov_score}" >> "$GITHUB_OUTPUT"
+        echo "Line coverage: ${cov_score}%"
+        # Generate badge SVG
+        # Color: green (>80), yellow (>60), red (<60)
+        if (( $(echo "$cov_score > 80" | bc -l) )); then
+          color="4c1"
+        elif (( $(echo "$cov_score > 60" | bc -l) )); then
+          color="dfb317"
+        else
+          color="e05d44"
+        fi
+        echo '<svg xmlns="http://www.w3.org/2000/svg" width="106" height="20" role="img" aria-label="coverage: '"${cov_score}"'%"><title>coverage: '"${cov_score}"'%</title><linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient><clipPath id="r"><rect width="106" height="20" rx="3" fill="#fff"/></clipPath><g clip-path="url(#r)"><rect width="61" height="20" fill="#555"/><rect x="61" width="45" height="20" fill="#'"${color}"'"/><rect width="106" height="20" fill="url(#s)"/></g><g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110"><text aria-hidden="true" x="315" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="510">coverage</text><text x="315" y="140" transform="scale(.1)" fill="#fff" textLength="510">coverage</text><text aria-hidden="true" x="835" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="350">'"${cov_score}"'%</text><text x="835" y="140" transform="scale(.1)" fill="#fff" textLength="350">'"${cov_score}"'%</text></g></svg>' > coverage.svg
+    - name: Upload coverage report
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: coverage-report
+        path: |
+          coverage_filtered.info
+          coverage.svg
+    - name: Verify changed files (badge)
+      uses: tj-actions/verify-changed-files@a1c6acee9df209257a246f2cc6ae8cb6581c1edf
+      id: verify-changed-files
+      with:
+        files: coverage.svg
+    - name: Commit badge file
+      if: steps.verify-changed-files.outputs.files_changed == 'true'
+      env:
+        COVERAGE: ${{ steps.get-coverage.outputs.coverage }}
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add coverage.svg
+        git commit -m "Updated coverage.svg to ${COVERAGE}%"
+        git push
