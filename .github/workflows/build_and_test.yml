@@ -50,7 +50,7 @@ jobs:
             buildable: false
         EOF
         # Overlay updated MUST package recipe  #TODO remove once upstreamed
-        BUILTIN_REPO=$(spack location --source-dir)/var/spack/repos/builtin
+        BUILTIN_REPO=$(spack location --repo builtin)
         echo "Spack builtin repo at: ${BUILTIN_REPO}"
         mkdir -p "${BUILTIN_REPO}/packages/must"
         curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
