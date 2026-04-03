@@ -33,7 +33,7 @@ jobs:
     - name: Install system dependencies
       run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc python3
+          sudo apt-get install -y cmake gcc gfortran python3 #todo gfortran may not be necessary for must
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
@@ -61,7 +61,7 @@ jobs:
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
-          spack --env ddc-env add must
+          spack --env ddc-env add must~fortran
         fi
         spack --env ddc-env add py-pip
         spack --env ddc-env install
