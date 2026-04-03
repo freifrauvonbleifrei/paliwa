@@ -41,17 +41,12 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
-        # Register gcc with Fortran support and gcc-runtime as externals
+        # gcc-runtime external (gcc+gfortran already found by spack external find)
         GCC_VER=$(gcc -dumpversion)
         cat >> spack/etc/spack/packages.yaml << EOF
           gcc-runtime:
             externals:
             - spec: gcc-runtime@${GCC_VER}
-              prefix: /usr
-            buildable: false
-          gcc:
-            externals:
-            - spec: gcc@${GCC_VER} languages='c,c++,fortran'
               prefix: /usr
             buildable: false
         EOF
