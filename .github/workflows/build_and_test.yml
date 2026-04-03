@@ -33,7 +33,7 @@ jobs:
     - name: Install system dependencies
       run: |
           sudo apt-get update
-          sudo apt-get install -y cmake gcc gfortran python3 #todo gfortran may not be necessary for must
+          sudo apt-get install -y cmake gcc gfortran flang python3 #todo gfortran/flang may not be necessary for must
     - name: Set up ddc-env
       shell: spack-bash {0}
       run: |
@@ -49,12 +49,11 @@ jobs:
               prefix: /usr
             buildable: false
         EOF
-        # Overlay updated MUST package recipe  #TODO remove once upstreamed
+        # Overlay patched MUST package with optional Fortran variant
+        # TODO remove once upstreamed
         BUILTIN_REPO=$(spack location --repo builtin)
-        echo "Spack builtin repo at: ${BUILTIN_REPO}"
         mkdir -p "${BUILTIN_REPO}/packages/must"
-        curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
-          -o "${BUILTIN_REPO}/packages/must/package.py"
+        cp spack_repo/must_package.py "${BUILTIN_REPO}/packages/must/package.py"
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
