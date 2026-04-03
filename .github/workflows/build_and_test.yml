@@ -49,12 +49,16 @@ jobs:
               prefix: /usr
             buildable: false
         EOF
+        # Overlay updated MUST package recipe  #TODO remove once upstreamed
+        curl -sL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
+          -o $(spack repo list | grep builtin | awk '{print $3}')/packages/must/package.py
         spack env create ddc-env
         spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
           spack --env ddc-env add mpi
+          spack --env ddc-env add must
         fi
         spack --env ddc-env add py-pip
         spack --env ddc-env install
@@ -94,6 +98,34 @@ jobs:
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         mpiexec --oversubscribe -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
+    - name: Run MUST correctness checks (MPI only)
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      shell: spack-bash {0}
+      run: |
+        spack env activate ddc-env
+        export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+        cd build
+        export OMPI_MCA_rmaps_base_oversubscribe=1
+        mkdir -p must_reports
+        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 2 \
+          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/roundtrip_1d_hat.html
+        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
+          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d_all_wavelets'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/roundtrip_2d.html
+        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
+          ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
+        grep -q "no MPI usage errors" MUST_Output.html
+        mv MUST_Output.html must_reports/combination_technique_2d.html
+        echo "MUST: all checks passed"
+    - name: Upload MUST reports
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: must-reports
+        path: build/must_reports/
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}
