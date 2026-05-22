@@ -91,7 +91,7 @@ decompose_domain_on_communicator(
   })); // no parallelization without MPI
   return {global_domain, MPI_COMM_NULL};
 #else // PALIWA_WITH_MPI
-constexpr size_t dimensionality = DiscreteDomainType::rank();
+  constexpr size_t dimensionality = DiscreteDomainType::rank();
 #ifndef NDEBUG
   assert(dimensionality == par_vector.size());
   auto num_procs = std::reduce(std::begin(par_vector), std::end(par_vector), 1,
