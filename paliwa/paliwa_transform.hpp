@@ -62,6 +62,7 @@ transform_in(ChunkSpanType const strided_grid,
       ddc::parallel_for_each(
           instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
             // TODO remove these checks for efficiency
+            // Can't be deleted
             if (!chunk_domain.contains(ixyz)) {
               return;
             }

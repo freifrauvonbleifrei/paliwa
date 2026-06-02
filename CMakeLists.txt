@@ -24,7 +24,9 @@ set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-ipa-sra")
 
 option(PALIWA_BUILD_EXAMPLES         "Build paliwa examples" OFF)
 option(PALIWA_BUILD_TESTS            "Build paliwa tests if BUILD_TESTING is enabled" OFF)
+option(PALIWA_BUILD_BENCHMARKS       "Build Google Benchmark executables" OFF)
 option(PALIWA_WITH_MPI               "Build paliwa with MPI support" ON)
+option(PALIWA_WITH_LIKWID            "Enable LIKWID marker support in the transform benchmark" OFF)
 
 include(CMakePackageConfigHelpers)
 include(CTest)
@@ -40,6 +42,41 @@ if(PALIWA_WITH_MPI)
     add_definitions(-DPALIWA_WITH_MPI)
 else()
     message(STATUS "MPI support disabled")
+endif()
+
+if(PALIWA_WITH_LIKWID)
+    find_program(SPACK_EXECUTABLE spack)
+    set(LIKWID_PREFIX "")
+    if(SPACK_EXECUTABLE)
+        execute_process(
+            COMMAND "${SPACK_EXECUTABLE}" location -i likwid
+            OUTPUT_VARIABLE LIKWID_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE LIKWID_PREFIX_RESULT)
+    endif()
+
+    if(NOT LIKWID_PREFIX_RESULT EQUAL 0 OR NOT EXISTS "${LIKWID_PREFIX}")
+        if(DEFINED ENV{LIKWID_ROOT})
+            set(LIKWID_PREFIX "$ENV{LIKWID_ROOT}")
+        elseif(DEFINED LIKWID_ROOT)
+            set(LIKWID_PREFIX "${LIKWID_ROOT}")
+        endif()
+    endif()
+
+    find_path(LIKWID_INCLUDE_DIR
+        NAMES likwid-marker.h
+        HINTS "${LIKWID_PREFIX}"
+        PATH_SUFFIXES include)
+    find_library(LIKWID_LIBRARY
+        NAMES likwid
+        HINTS "${LIKWID_PREFIX}"
+        PATH_SUFFIXES lib)
+
+    if(NOT LIKWID_INCLUDE_DIR OR NOT LIKWID_LIBRARY)
+        message(FATAL_ERROR "Could not find LIKWID headers/libraries. Set LIKWID_ROOT or install likwid via Spack.")
+    endif()
+
+    message(STATUS "LIKWID support enabled: ${LIKWID_PREFIX}")
 endif()
 
 ## paliwa core library
@@ -81,10 +118,35 @@ install(TARGETS paliwa_core EXPORT PaliwaCoreTargets FILE_SET HEADERS)
 #     target_compile_definitions( test_ddc_strided PUBLIC PALIWA_WITH_MPI )
 # endif()
 
-if("${BUILD_TESTING}" AND "${PALIWA_BUILD_TESTS}")
+if(("${BUILD_TESTING}" AND "${PALIWA_BUILD_TESTS}") OR "${PALIWA_BUILD_BENCHMARKS}")
     ## GoogleTest
-    find_package(GTest REQUIRED) # version 1.14?
-    add_subdirectory(test/)
+    if("${BUILD_TESTING}" AND "${PALIWA_BUILD_TESTS}")
+        find_package(GTest QUIET) # version 1.14?
+        if(NOT GTest_FOUND)
+            if(EXISTS "/usr/src/googletest/CMakeLists.txt")
+                message(STATUS "Using local googletest sources from /usr/src/googletest")
+                set(BUILD_GMOCK ON CACHE BOOL "Build GoogleMock" FORCE)
+                set(INSTALL_GTEST OFF CACHE BOOL "Do not install GoogleTest" FORCE)
+                add_subdirectory(/usr/src/googletest ${CMAKE_BINARY_DIR}/googletest EXCLUDE_FROM_ALL)
+            else()
+                message(FATAL_ERROR "Could not find GTest or local googletest sources")
+            endif()
+        endif()
+    endif()
+
+    if("${PALIWA_BUILD_BENCHMARKS}")
+        find_package(benchmark QUIET)
+        if(NOT benchmark_FOUND)
+            message(FATAL_ERROR "Could not find Google Benchmark package 'benchmark'")
+        endif()
+    endif()
+
+    if("${BUILD_TESTING}" AND "${PALIWA_BUILD_TESTS}")
+        add_subdirectory(test/)
+    endif()
+    if("${PALIWA_BUILD_BENCHMARKS}")
+        add_subdirectory(benchmarks/)
+    endif()
 endif()
 
 

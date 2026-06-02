@@ -22,9 +22,11 @@ class Paliwa(CMakePackage):
 
     variant("mpi", default=True, description="Enable MPI support")
     variant("tests", default=False, description="Build tests")
+    variant("benchmarks", default=False, description="Build Google Benchmark executables")
 
     depends_on("cxx", type="build")
     depends_on("cmake@3.25:", type="build")
+    depends_on("benchmark", when="+benchmarks")
     depends_on("ddc")
     depends_on("googletest", when="+tests", type="test")
     depends_on("kokkos")
@@ -34,6 +36,7 @@ class Paliwa(CMakePackage):
         args = [
             self.define("PALIWA_BUILD_EXAMPLES", False),
             self.define_from_variant("PALIWA_BUILD_TESTS", "tests"),
+            self.define_from_variant("PALIWA_BUILD_BENCHMARKS", "benchmarks"),
             self.define_from_variant("PALIWA_WITH_MPI", "mpi"),
         ]
         return args

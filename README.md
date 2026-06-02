@@ -50,6 +50,10 @@ cmake -DPALIWA_BUILD_TESTS=ON -DPALIWA_WITH_MPI=ON -B ./build
 cmake --build ./build/ --config Release
 ```
 
+To build the benchmark executables as well, configure with
+`-DPALIWA_BUILD_BENCHMARKS=ON`. With Spack, enable the `benchmarks`
+variant on the `paliwa` package.
+
 (check out the [CI workflow file](./.github/workflows/build_and_test.yml)
 for details on a compatible environment.)
 
