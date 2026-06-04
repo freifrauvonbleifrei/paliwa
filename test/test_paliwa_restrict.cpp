@@ -75,7 +75,7 @@ void get_required_transform_domains_1d() {
         SDDom restricted_strided_dom =
             paliwa::restrict_strided_with_discrete(strided_dom_all, local_dom);
         ddc::SparseDiscreteDomain<DDimX> required_transform_domain =
-            paliwa::get_required_transform_domains(
+          paliwa::get_required_transform_domain(
                 is_for_hierarchization, strided_dom_all, restricted_strided_dom,
                 level, minimum_level, maximum_level, wavelet_name);
 
@@ -110,12 +110,12 @@ void get_required_transform_domains_1d() {
             });
         // do the transform and check non-nans
         if (is_for_hierarchization) {
-          paliwa::hierarchize(all_strided_span, level, minimum_level,
-                              maximum_level, wavelet_name,
+          paliwa::hierarchize(all_strided_span, strided_dom_all, level,
+                              minimum_level, maximum_level, wavelet_name,
                               Kokkos::DefaultHostExecutionSpace());
         } else {
-          paliwa::dehierarchize(all_strided_span, level, minimum_level,
-                                maximum_level, wavelet_name,
+          paliwa::dehierarchize(all_strided_span, strided_dom_all, level,
+                                minimum_level, maximum_level, wavelet_name,
                                 Kokkos::DefaultHostExecutionSpace());
         }
         ddc::host_for_each(
@@ -125,12 +125,12 @@ void get_required_transform_domains_1d() {
 
         // do the transform again and check for same result
         if (is_for_hierarchization) {
-          paliwa::hierarchize(transform_span, level, minimum_level,
-                              maximum_level, wavelet_name,
+          paliwa::hierarchize(transform_span, strided_dom_all, level,
+                              minimum_level, maximum_level, wavelet_name,
                               Kokkos::DefaultHostExecutionSpace());
         } else {
-          paliwa::dehierarchize(transform_span, level, minimum_level,
-                                maximum_level, wavelet_name,
+          paliwa::dehierarchize(transform_span, strided_dom_all, level,
+                                minimum_level, maximum_level, wavelet_name,
                                 Kokkos::DefaultHostExecutionSpace());
         }
         ddc::host_for_each(

@@ -166,8 +166,9 @@ void run_combination_technique(InstancesType const &instances,
     DVect level(all_levels[grid_index]);
     auto strided_grid = level_data[grid_index].span_view();
 
-    paliwa::hierarchize(strided_grid, level, ddc_minimum_level,
-                        ddc_maximum_level, wavelet_name,
+    paliwa::hierarchize(strided_grid, component_grid_domains[grid_index],
+                        level, ddc_minimum_level, ddc_maximum_level,
+                        wavelet_name,
                         instances[grid_index % instances.size()]);
   }
   paliwa::fence_all_instances(instances);
@@ -296,6 +297,10 @@ void run_combination_technique(InstancesType const &instances,
   auto full_grid_view = full_grid.span_view();
   ddc::parallel_fill(full_grid_view, 0);
 
+  SDDom const full_max = paliwa::strided_domain_from_level<DDims...>(
+      ddc::detail::array(ddc_maximum_level),
+      ddc::detail::array(ddc_maximum_level));
+
   // now copy into full grid
   for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
        ++i) {
@@ -317,8 +322,9 @@ void run_combination_technique(InstancesType const &instances,
   paliwa::fence_all_instances(instances);
 
   //   de-hierarchize on the combined full grid
-  paliwa::dehierarchize(full_grid_view, ddc_maximum_level, ddc_minimum_level,
-                        ddc_maximum_level, wavelet_name, instances[0]);
+  paliwa::dehierarchize(full_grid_view, full_max, ddc_maximum_level,
+                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
+                        instances[0]);
   paliwa::fence_all_instances(instances);
 
   std::string max_level_str = "";
@@ -409,8 +415,8 @@ void test_distributed_combination_technique_2d() {
       paliwa::optional_initialize_dims_periodic_unit_cube(resolution);
 
   std::array<int, 2> par_vector = {2, 2};
-  auto [local_dom, cart_comm] = paliwa::decompose_domain_on_communicator(
-      global_dom, sub_comm, par_vector);
+  auto local_dom = paliwa::decompose(global_dom, sub_comm, par_vector);
+  auto cart_comm = paliwa::process_group::get_cart_comm();
 
   DVect ddc_min(minimum_level), ddc_max(maximum_level);
   std::string const wavelet = "biorthogonal";
@@ -486,7 +492,6 @@ void test_distributed_combination_technique_2d() {
   EXPECT_NEAR(global_sum / static_cast<double>(full_max.size()),
               sinusoid_integral_analytical(2), 0.031);
 
-  MPI_Comm_free(&cart_comm);
   MPI_Comm_free(&sub_comm);
 }
 
