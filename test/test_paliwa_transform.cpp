@@ -30,8 +30,7 @@ void test_transform_hat_stays_same_2d() {
       // indices 0, 2, …, 14 in each dimension
       SDDom const strided_domain =
           paliwa::strided_domain_from_level<DDimX, DDimY>(
-              ddc::detail::array(level),
-              ddc::detail::array(maximum_level));
+              ddc::detail::array(level), ddc::detail::array(maximum_level));
 
       ddc::Chunk strided_grid_chunk(strided_domain,
                                     ddc::DeviceAllocator<double>());
@@ -41,7 +40,7 @@ void test_transform_hat_stays_same_2d() {
       ddc::parallel_for_each(
           Kokkos::DefaultExecutionSpace(), strided_domain,
           KOKKOS_LAMBDA(DElem const ixy) {
-            auto generator    = random_pool.get_state();
+            auto generator = random_pool.get_state();
             double random_val = generator.drand(0., 1.);
             random_pool.free_state(generator);
             strided_grid(ixy) =
@@ -65,8 +64,8 @@ void test_transform_hat_stays_same_2d() {
 
       ddc::host_for_each(strided_domain, [&](DElem const ixy) {
         if (strided_domain_lmin.contains(ixy)) {
-          EXPECT_NEAR(strided_grid_host(ixy),
-                      strided_grid_host_before(ixy), 1e-14);
+          EXPECT_NEAR(strided_grid_host(ixy), strided_grid_host_before(ixy),
+                      1e-14);
         } else {
           EXPECT_NE(strided_grid_host(ixy), strided_grid_host_before(ixy));
         }
@@ -80,8 +79,8 @@ void test_transform_hat_stays_same_2d() {
           Kokkos::SharedHostPinnedSpace(), strided_grid);
 
       ddc::host_for_each(strided_domain, [&](DElem const ixy) {
-        EXPECT_NEAR(strided_grid_host_after(ixy),
-                    strided_grid_host_before(ixy), 1e-13);
+        EXPECT_NEAR(strided_grid_host_after(ixy), strided_grid_host_before(ixy),
+                    1e-13);
       });
     }
   }
@@ -106,8 +105,7 @@ void test_transform_mass_conservation_2d(std::string const &wavelet_name) {
 
       SDDom const strided_domain =
           paliwa::strided_domain_from_level<DDimX, DDimY>(
-              ddc::detail::array(level),
-              ddc::detail::array(maximum_level));
+              ddc::detail::array(level), ddc::detail::array(maximum_level));
 
       ddc::Chunk strided_grid_chunk(strided_domain,
                                     ddc::DeviceAllocator<double>());
@@ -117,7 +115,7 @@ void test_transform_mass_conservation_2d(std::string const &wavelet_name) {
       ddc::parallel_for_each(
           Kokkos::DefaultExecutionSpace(), strided_domain,
           KOKKOS_LAMBDA(DElem const ixy) {
-            auto generator    = random_pool.get_state();
+            auto generator = random_pool.get_state();
             double random_val = generator.drand(0., 1.);
             random_pool.free_state(generator);
             strided_grid(ixy) =
@@ -143,8 +141,8 @@ void test_transform_mass_conservation_2d(std::string const &wavelet_name) {
           Kokkos::DefaultExecutionSpace(), strided_domain_lmin, 0.0,
           ddc::reducer::sum<double>(), strided_grid);
 
-      EXPECT_NEAR(lmin_sum,
-                  reference_average * strided_domain_lmin.size(), 1e-13);
+      EXPECT_NEAR(lmin_sum, reference_average * strided_domain_lmin.size(),
+                  1e-13);
     }
   }
 }

@@ -40,7 +40,7 @@ double sinusoid_integral_analytical(int d) {
 
 template <typename InstancesType, typename... DDims>
 std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
-                        ddc::DeviceAllocator<double>>>
+                       ddc::DeviceAllocator<double>>>
 initialize_combination_scheme(
     std::vector<ddc::StridedDiscreteDomain<DDims...>> const
         &component_grid_domains,
@@ -49,7 +49,7 @@ initialize_combination_scheme(
   using DElem = ddc::DiscreteElement<DDims...>;
 
   std::vector<ddc::Chunk<double, ddc::StridedDiscreteDomain<DDims...>,
-                          ddc::DeviceAllocator<double>>>
+                         ddc::DeviceAllocator<double>>>
       level_data;
 
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
@@ -75,7 +75,7 @@ initialize_combination_scheme(
 
 template <typename... DDims, typename InstancesType>
 void run_combination_technique(InstancesType const &instances,
-                                paliwa::MPICommType comm) {
+                               paliwa::MPICommType comm) {
   constexpr size_t dimensionality = sizeof...(DDims);
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   using DElem = SDDom::discrete_element_type;
@@ -91,8 +91,8 @@ void run_combination_technique(InstancesType const &instances,
     throw std::runtime_error("Dimensionality not supported");
   }
   std::array<long int, dimensionality> resolution;
-  std::transform(maximum_level.begin(), maximum_level.end(),
-                  resolution.begin(), [](int ml) { return (1 << ml); });
+  std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
+                 [](int ml) { return (1 << ml); });
   DVect resolution_all(resolution);
 
   ddc::DiscreteDomain<DDims...> dom_all =
@@ -108,7 +108,7 @@ void run_combination_technique(InstancesType const &instances,
                   {8, 5},  {9, 4},  {10, 3}, {2, 10}, {3, 9}, {4, 8},
                   {5, 7},  {6, 6},  {7, 5},  {8, 4},  {9, 3}};
     all_combi_coefficients = {1,  1,  1,  1,  1,  1,  1,  1, 1,
-                               -1, -1, -1, -1, -1, -1, -1, -1};
+                              -1, -1, -1, -1, -1, -1, -1, -1};
   } else if constexpr (dimensionality == 3) {
     minimum_level = {4, 5, 6};
     all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
@@ -131,7 +131,7 @@ void run_combination_technique(InstancesType const &instances,
   // TODO: make this full-grid compatible class?
   std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
       level_data = initialize_combination_scheme(component_grid_domains,
-                                                  all_levels, instances);
+                                                 all_levels, instances);
   size_t accumulated_full_grid_size = 0;
   for (const auto &domain : component_grid_domains) {
     accumulated_full_grid_size += domain.size();
@@ -167,10 +167,9 @@ void run_combination_technique(InstancesType const &instances,
     DVect level(all_levels[grid_index]);
     auto strided_grid = level_data[grid_index].span_view();
 
-    paliwa::hierarchize(strided_grid, component_grid_domains[grid_index],
-                         level, ddc_minimum_level, ddc_maximum_level,
-                         wavelet_name,
-                         instances[grid_index % instances.size()]);
+    paliwa::hierarchize(strided_grid, component_grid_domains[grid_index], level,
+                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
+                        instances[grid_index % instances.size()]);
   }
   paliwa::fence_all_instances(instances);
 
@@ -189,23 +188,23 @@ void run_combination_technique(InstancesType const &instances,
   for (const auto &level : all_levels) {
     std::array<long int, dimensionality> tmp_level;
     paliwa::iterate_hierarchical_subspaces(level, tmp_level, 0,
-                                            insert_function);
+                                           insert_function);
   }
 
   // TODO: make this a sparse-grid compatible class?
   Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
-                        Kokkos::DefaultExecutionSpace>
+                       Kokkos::DefaultExecutionSpace>
       subspaces_levels(subspace_count.size());
   Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
-                        Kokkos::DefaultExecutionSpace>
+                       Kokkos::DefaultExecutionSpace>
       subspaces_domains_and_data_pointers(subspace_count.size());
   // Leads to weird hangup (different type w/ hash function?)!!
   // auto subspaces_levels_host = Kokkos::create_mirror(subspaces_levels);
   Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
-                        Kokkos::SharedHostPinnedSpace>
+                       Kokkos::SharedHostPinnedSpace>
       subspaces_levels_host(subspace_count.size());
   Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
-                        Kokkos::SharedHostPinnedSpace>
+                       Kokkos::SharedHostPinnedSpace>
       subspaces_domains_and_data_pointers_host(subspace_count.size());
 
   size_t accumulated_sparse_grid_size = 0;
@@ -234,7 +233,7 @@ void run_combination_technique(InstancesType const &instances,
 
   // Allocate once.
   Kokkos::View<double *> all_subspace_data("all_subspace_data",
-                                            accumulated_sparse_grid_size);
+                                           accumulated_sparse_grid_size);
 
   size_t current_data_pointer_index = 0;
   for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
@@ -251,7 +250,7 @@ void run_combination_technique(InstancesType const &instances,
   }
   Kokkos::deep_copy(subspaces_levels, subspaces_levels_host);
   Kokkos::deep_copy(subspaces_domains_and_data_pointers,
-                     subspaces_domains_and_data_pointers_host);
+                    subspaces_domains_and_data_pointers_host);
 
   // Collect component grids onto the sparse grid.
   for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
@@ -260,8 +259,8 @@ void run_combination_technique(InstancesType const &instances,
     double coefficient = all_combi_coefficients[grid_index];
     auto strided_grid = level_data[grid_index].span_view();
 
-    for (size_t i = 0;
-         i < subspaces_domains_and_data_pointers_host.capacity(); ++i) {
+    for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
+         ++i) {
       if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
         auto const &subspace_level = subspaces_levels_host.value_at(i);
         auto const &subspace_domain =
@@ -279,7 +278,7 @@ void run_combination_technique(InstancesType const &instances,
           continue;
         // Copy data into the allocated space.
         ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
-                                                           subspace_domain);
+                                                          subspace_domain);
         auto subspace_view = subspace_chunk_span.span_view();
         ddc::parallel_for_each(
             instances[i % instances.size()], subspace_domain,
@@ -294,7 +293,7 @@ void run_combination_technique(InstancesType const &instances,
   // Interpolate all onto full grid.
   // Allocate and initialize to 0.
   ddc::Chunk full_grid("interpolated_on_full_grid", dom_all,
-                        ddc::DeviceAllocator<double>());
+                       ddc::DeviceAllocator<double>());
   auto full_grid_view = full_grid.span_view();
   ddc::parallel_fill(full_grid_view, 0);
 
@@ -311,7 +310,7 @@ void run_combination_technique(InstancesType const &instances,
       auto const &data_pointer =
           subspaces_domains_and_data_pointers_host.value_at(i).second;
       ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
-                                                         subspace_domain);
+                                                        subspace_domain);
       auto subspace_view = subspace_chunk_span.span_view();
       ddc::parallel_for_each(
           instances[i % instances.size()], subspace_domain,
@@ -324,8 +323,8 @@ void run_combination_technique(InstancesType const &instances,
 
   // De-hierarchize on the combined full grid.
   paliwa::dehierarchize(full_grid_view, full_max, ddc_maximum_level,
-                         ddc_minimum_level, ddc_maximum_level, wavelet_name,
-                         instances[0]);
+                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
+                        instances[0]);
   paliwa::fence_all_instances(instances);
 
   std::string max_level_str = "";
@@ -342,13 +341,12 @@ void run_combination_technique(InstancesType const &instances,
   double const mean_value = reduced_value / dom_all.size();
   std::cout << "Mean value on finest grid: " << mean_value << " (from "
             << reduced_value << " total)" << std::endl;
-  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality),
-              0.031);
+  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.031);
 }
 
 template <size_t dimensionality, typename InstancesType>
 void run_combination_technique_in_dimensions(InstancesType const &instances,
-                                              paliwa::MPICommType comm) {
+                                             paliwa::MPICommType comm) {
   if constexpr (dimensionality == 2) {
     run_combination_technique<paliwa::DDimA, paliwa::DDimB>(instances, comm);
   } else if constexpr (dimensionality == 3) {
@@ -356,7 +354,7 @@ void run_combination_technique_in_dimensions(InstancesType const &instances,
         instances, comm);
   } else if constexpr (dimensionality == 4) {
     run_combination_technique<paliwa::DDimF, paliwa::DDimG, paliwa::DDimH,
-                               paliwa::DDimI>(instances, comm);
+                              paliwa::DDimI>(instances, comm);
   } else {
     throw std::runtime_error("Dimensionality not yet supported");
   }
@@ -365,22 +363,22 @@ void run_combination_technique_in_dimensions(InstancesType const &instances,
 TEST(combination_technique, full_integration_2d) {
   // Use up to 32 concurrent streams.
   auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
   run_combination_technique_in_dimensions<2>(instances, MPI_COMM_WORLD);
 }
 
 TEST(combination_technique, full_integration_3d) {
   auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
   run_combination_technique_in_dimensions<3>(instances, MPI_COMM_WORLD);
 }
 
 TEST(combination_technique, full_integration_4d) {
   auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
   run_combination_technique_in_dimensions<4>(instances, MPI_COMM_WORLD);
 }
 
@@ -426,21 +424,20 @@ void test_distributed_combination_technique_2d() {
   auto instances_arr = Kokkos::Experimental::partition_space(
       Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1);
   std::vector<Kokkos::DefaultExecutionSpace> instances(instances_arr.begin(),
-                                                        instances_arr.end());
+                                                       instances_arr.end());
 
   std::vector<SDDom> full_doms, local_doms;
   for (auto const &lv : all_levels) {
     auto f = paliwa::strided_domain_from_level<DimX, DimY>(lv, maximum_level);
     full_doms.push_back(f);
-    local_doms.push_back(
-        paliwa::restrict_strided_with_discrete(f, local_dom));
+    local_doms.push_back(paliwa::restrict_strided_with_discrete(f, local_dom));
   }
 
   using ChunkType = ddc::Chunk<double, SDDom, ddc::HostAllocator<double>>;
   std::vector<ChunkType> grids;
   for (size_t i = 0; i < all_levels.size(); ++i) {
     grids.emplace_back("g" + std::to_string(i), local_doms[i],
-                        ddc::HostAllocator<double>());
+                       ddc::HostAllocator<double>());
     auto s = grids.back().span_view();
     ddc::host_for_each(local_doms[i], [&](DElem e) {
       auto c = ddc::coordinate(e).array();
@@ -458,12 +455,12 @@ void test_distributed_combination_technique_2d() {
 
     DVect lv(all_levels[i]);
     paliwa::hierarchize(s, full_doms[i], lv, ddc_min, ddc_max, wavelet,
-                         instances[i % instances.size()]);
+                        instances[i % instances.size()]);
   }
   paliwa::fence_all_instances(instances);
 
-  auto full_max = paliwa::strided_domain_from_level<DimX, DimY>(
-      maximum_level, maximum_level);
+  auto full_max = paliwa::strided_domain_from_level<DimX, DimY>(maximum_level,
+                                                                maximum_level);
   auto local_max = paliwa::restrict_strided_with_discrete(full_max, local_dom);
 
   ddc::Chunk combined("combined", local_max, ddc::HostAllocator<double>());
@@ -473,8 +470,7 @@ void test_distributed_combination_technique_2d() {
   for (size_t i = 0; i < all_levels.size(); ++i) {
     double coeff = all_coefficients[i];
     auto gs = grids[i].span_cview();
-    ddc::host_for_each(local_doms[i],
-                        [&](DElem e) { cs(e) += coeff * gs(e); });
+    ddc::host_for_each(local_doms[i], [&](DElem e) { cs(e) += coeff * gs(e); });
   }
 
   double partial = 0.0;
@@ -482,7 +478,7 @@ void test_distributed_combination_technique_2d() {
   ddc::host_for_each(local_max, [&](DElem e) { partial += cs(e); });
 
   paliwa::dehierarchize(cs, full_max, ddc_max, ddc_min, ddc_max, wavelet,
-                         instances[0]);
+                        instances[0]);
 
   paliwa::fence_all_instances(instances);
 

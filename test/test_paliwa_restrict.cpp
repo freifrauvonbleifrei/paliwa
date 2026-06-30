@@ -75,7 +75,7 @@ void get_required_transform_domains_1d() {
         SDDom restricted_strided_dom =
             paliwa::restrict_strided_with_discrete(strided_dom_all, local_dom);
         ddc::SparseDiscreteDomain<DDimX> required_transform_domain =
-          paliwa::get_required_transform_domain(
+            paliwa::get_required_transform_domain(
                 is_for_hierarchization, strided_dom_all, restricted_strided_dom,
                 level, minimum_level, maximum_level, wavelet_name);
 

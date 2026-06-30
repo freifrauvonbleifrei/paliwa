@@ -43,8 +43,7 @@ using MPICommType = void *;
 #endif // PALIWA_WITH_MPI
 
 struct MPIOptionalGuard {
-  MPIOptionalGuard([[maybe_unused]] int &argc,
-                    [[maybe_unused]] char **&argv) {
+  MPIOptionalGuard([[maybe_unused]] int &argc, [[maybe_unused]] char **&argv) {
 #ifdef PALIWA_WITH_MPI
     MPI_Init(&argc, &argv);
 #endif
@@ -98,10 +97,10 @@ struct process_group {
     State &s = get_state();
     assert(d >= 0 && d < s.m_n_dims);
     assert(coord >= 0 && coord < s.m_cart_dims[d]);
-    return s.m_coord_to_rank[static_cast<std::size_t>(d) *
-                                  static_cast<std::size_t>(
-                                      s.m_max_ranks_per_dim) +
-                              static_cast<std::size_t>(coord)];
+    return s
+        .m_coord_to_rank[static_cast<std::size_t>(d) *
+                             static_cast<std::size_t>(s.m_max_ranks_per_dim) +
+                         static_cast<std::size_t>(coord)];
   }
 #endif // PALIWA_WITH_MPI
 
@@ -166,9 +165,8 @@ private:
         int rank = -1;
         MPI_Cart_rank(comm, coords.data(), &rank);
         s.m_coord_to_rank[static_cast<std::size_t>(d) *
-                               static_cast<std::size_t>(
-                                   s.m_max_ranks_per_dim) +
-                           static_cast<std::size_t>(coord)] = rank;
+                              static_cast<std::size_t>(s.m_max_ranks_per_dim) +
+                          static_cast<std::size_t>(coord)] = rank;
       }
     }
 #endif // PALIWA_WITH_MPI
@@ -215,10 +213,10 @@ template <typename T> struct MPIValueType {
 #endif // PALIWA_WITH_MPI
 
 template <class HeadTag, class... Tags>
-constexpr ddc::DiscreteDomain<HeadTag, Tags...> distribute_idx_range(
-    ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
-    ddc::DiscreteVector<HeadTag, Tags...> const &par_vector,
-    ddc::DiscreteVector<HeadTag, Tags...> const &my_coords) {
+constexpr ddc::DiscreteDomain<HeadTag, Tags...>
+distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
+                     ddc::DiscreteVector<HeadTag, Tags...> const &par_vector,
+                     ddc::DiscreteVector<HeadTag, Tags...> const &my_coords) {
 
   ddc::DiscreteDomain<HeadTag> global_1d =
       ddc::select<HeadTag>(global_idx_range);
@@ -232,17 +230,16 @@ constexpr ddc::DiscreteDomain<HeadTag, Tags...> distribute_idx_range(
 
   ddc::DiscreteVector<HeadTag> chunk_size(global_1d.size() / n_ranks);
   ddc::DiscreteElement<HeadTag> start(global_1d.front() +
-                                       rank_coord * chunk_size);
+                                      rank_coord * chunk_size);
   ddc::DiscreteDomain<HeadTag> local_1d(start, chunk_size);
 
   if constexpr (sizeof...(Tags) == 0) {
     return local_1d;
   } else {
     return ddc::DiscreteDomain<HeadTag, Tags...>(
-        local_1d,
-        distribute_idx_range(ddc::select<Tags...>(global_idx_range),
-                              ddc::select<Tags...>(par_vector),
-                              ddc::select<Tags...>(my_coords)));
+        local_1d, distribute_idx_range(ddc::select<Tags...>(global_idx_range),
+                                       ddc::select<Tags...>(par_vector),
+                                       ddc::select<Tags...>(my_coords)));
   }
 }
 
@@ -266,10 +263,10 @@ constexpr ddc::DiscreteDomain<Dim> get_rank_local_domain_along_dim(
 ///
 /// @return Map from owner coordinate (0-based) to ghost element list.
 template <typename Dim>
-std::map<int, std::vector<ddc::DiscreteElement<Dim>>> classify_ghost_by_coord(
-    ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
-    ddc::DiscreteDomain<Dim> const &global_domain_1d,
-    int n_ranks_along_dim) {
+std::map<int, std::vector<ddc::DiscreteElement<Dim>>>
+classify_ghost_by_coord(ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
+                        ddc::DiscreteDomain<Dim> const &global_domain_1d,
+                        int n_ranks_along_dim) {
   auto global_size = static_cast<long int>(global_domain_1d.size());
   long int chunk_size = global_size / n_ranks_along_dim;
   long int global_front = global_domain_1d.front().template uid<Dim>();
@@ -293,9 +290,10 @@ std::map<int, std::vector<ddc::DiscreteElement<Dim>>> classify_ghost_by_coord(
 /// Without MPI: always returns an empty map — on a single process there
 /// are no remote peers and therefore no ghost data to exchange.
 template <typename Dim>
-std::map<int, std::vector<ddc::DiscreteElement<Dim>>> classify_ghost_by_rank(
-    ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
-    ddc::DiscreteDomain<Dim> const &global_domain_1d, int dim_index) {
+std::map<int, std::vector<ddc::DiscreteElement<Dim>>>
+classify_ghost_by_rank(ddc::SparseDiscreteDomain<Dim> const &ghost_domain,
+                       ddc::DiscreteDomain<Dim> const &global_domain_1d,
+                       int dim_index) {
 #ifndef PALIWA_WITH_MPI
   (void)ghost_domain;
   (void)global_domain_1d;
@@ -314,8 +312,7 @@ std::map<int, std::vector<ddc::DiscreteElement<Dim>>> classify_ghost_by_rank(
 
   std::map<int, std::vector<ddc::DiscreteElement<Dim>>> result;
   for (auto &[coord, indices] : by_coord)
-    result[process_group::coord_to_rank(dim_index, coord)] =
-        std::move(indices);
+    result[process_group::coord_to_rank(dim_index, coord)] = std::move(indices);
   return result;
 #endif
 }
@@ -458,8 +455,7 @@ void exchange_ghost_slices(
   MPIValueType<value_type> mpi_value_type;
 
   // Byte offset of a multi-D element from the span's data pointer.
-  auto byte_offset = [](auto const &span,
-                         ddc::DiscreteElement<DDims...> elem) {
+  auto byte_offset = [](auto const &span, ddc::DiscreteElement<DDims...> elem) {
     return static_cast<MPI_Aint>(
         (&span(elem) - span.data_handle()) *
         static_cast<std::ptrdiff_t>(sizeof(value_type)));
@@ -470,17 +466,16 @@ void exchange_ghost_slices(
   // first index of the local 1-D domain.
   auto first_local_1d_elem = local_restricted_1d.front();
   std::vector<ddc::DiscreteElement<DDims...>> pole_bases;
-  ddc::host_for_each(local_restricted,
-                      [&](ddc::DiscreteElement<DDims...> elem) {
-                        if (ddc::select<DimToTransform>(elem) ==
-                            first_local_1d_elem)
-                          pole_bases.push_back(elem);
-                      });
+  ddc::host_for_each(
+      local_restricted, [&](ddc::DiscreteElement<DDims...> elem) {
+        if (ddc::select<DimToTransform>(elem) == first_local_1d_elem)
+          pole_bases.push_back(elem);
+      });
 
   // Build a flat displacement array: each 1-D index combined with every
   // pole base produces one element of one hyperplane slice.
   auto build_displacements = [&](auto const &span,
-                                  std::vector<DElem1d> const &indices_1d) {
+                                 std::vector<DElem1d> const &indices_1d) {
     std::vector<MPI_Aint> displacements;
     displacements.reserve(indices_1d.size() * pole_bases.size());
     for (auto const &d_elem : indices_1d)
@@ -502,31 +497,30 @@ void exchange_ghost_slices(
 
     MPI_Datatype recv_type;
     MPI_Type_create_hindexed(recv_count, recv_blocklens.data(),
-                              recv_displ.data(), mpi_value_type, &recv_type);
+                             recv_displ.data(), mpi_value_type, &recv_type);
     MPI_Type_commit(&recv_type);
     types_to_free.push_back(recv_type);
 
     MPI_Request req;
     MPI_Irecv(extended_span.data_handle(), 1, recv_type, peer.remote_rank, 20,
-               cart_comm, &req);
+              cart_comm, &req);
     requests.push_back(req);
   }
 
   for (auto const &peer : peers) {
-    auto send_displ =
-        build_displacements(local_grid, peer.indices_they_need);
+    auto send_displ = build_displacements(local_grid, peer.indices_they_need);
     int send_count = static_cast<int>(send_displ.size());
     std::vector<int> send_blocklens(send_count, 1);
 
     MPI_Datatype send_type;
     MPI_Type_create_hindexed(send_count, send_blocklens.data(),
-                              send_displ.data(), mpi_value_type, &send_type);
+                             send_displ.data(), mpi_value_type, &send_type);
     MPI_Type_commit(&send_type);
     types_to_free.push_back(send_type);
 
     MPI_Request req;
     MPI_Isend(local_grid.data_handle(), 1, send_type, peer.remote_rank, 20,
-               cart_comm, &req);
+              cart_comm, &req);
     requests.push_back(req);
   }
 
@@ -570,7 +564,7 @@ decompose(DiscreteDomainType const &global_domain, MPICommType comm,
 
 #ifndef PALIWA_WITH_MPI
   assert(std::all_of(par_vector.begin(), par_vector.end(),
-                      [](int i) { return i == 1; }));
+                     [](int i) { return i == 1; }));
   (void)comm;
   process_group::set_state(MPI_COMM_NULL);
   return global_domain;
@@ -581,7 +575,7 @@ decompose(DiscreteDomainType const &global_domain, MPICommType comm,
 #ifndef NDEBUG
   {
     int n = std::reduce(par_vector.begin(), par_vector.end(), 1,
-                         std::multiplies<int>());
+                        std::multiplies<int>());
     int comm_size = -1;
     MPI_Comm_size(comm, &comm_size);
     assert(n == comm_size);
@@ -593,7 +587,7 @@ decompose(DiscreteDomainType const &global_domain, MPICommType comm,
 
   MPI_Comm cart_comm = MPI_COMM_NULL;
   MPI_Cart_create(comm, static_cast<int>(dimensionality), par_vector.data(),
-                   periods.data(), /*reorder=*/true, &cart_comm);
+                  periods.data(), /*reorder=*/true, &cart_comm);
 
   // set_state builds the full topology cache from cart_comm.
   process_group::set_state(cart_comm);
@@ -601,9 +595,8 @@ decompose(DiscreteDomainType const &global_domain, MPICommType comm,
   // Use the already-cached coords to compute the local subdomain — no
   // further MPI calls needed.
   DVect par_vector_dv;
-  std::ranges::transform(par_vector,
-                          ddc::detail::array(par_vector_dv).begin(),
-                          [](int i) { return static_cast<long int>(i); });
+  std::ranges::transform(par_vector, ddc::detail::array(par_vector_dv).begin(),
+                         [](int i) { return static_cast<long int>(i); });
   DVect my_coords_dv;
   for (std::size_t d = 0; d < dimensionality; ++d)
     ddc::detail::array(my_coords_dv)[d] =

@@ -53,7 +53,7 @@ TEST(distribute, get_rank_local_domain_along_dim) {
 void test_classify_ghost_by_coord() {
   using Dim = paliwa::DDimV;
   auto global_dom = ddc::DiscreteDomain<Dim>(ddc::DiscreteElement<Dim>(0),
-                                              ddc::DiscreteVector<Dim>(128));
+                                             ddc::DiscreteVector<Dim>(128));
   using DElem = ddc::DiscreteElement<Dim>;
 
   Kokkos::View<DElem *, Kokkos::SharedSpace> g1("g1", 3);
@@ -223,8 +223,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   auto local_strided =
       paliwa::restrict_strided_with_discrete(full_strided, local_dom);
 
-  ddc::Chunk local_chunk("local", local_strided,
-                          ddc::HostAllocator<double>());
+  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
   auto local_span = local_chunk.span_view();
   ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
   auto orig_span = orig_chunk.span_view();
@@ -235,8 +234,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   });
 
   // Build a serial reference on rank 0 by gathering all data.
-  ddc::Chunk serial_chunk("serial", full_strided,
-                           ddc::HostAllocator<double>());
+  ddc::Chunk serial_chunk("serial", full_strided, ddc::HostAllocator<double>());
   auto serial_span = serial_chunk.span_view();
   {
     int n = static_cast<int>(local_strided.size());
@@ -268,14 +266,14 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   // hierarchize now always takes full_strided explicitly.
   if (world_rank == 0) {
     paliwa::hierarchize(serial_span, full_strided, level_v, min_level_v,
-                         max_level_v, wavelet_name,
-                         Kokkos::DefaultHostExecutionSpace());
+                        max_level_v, wavelet_name,
+                        Kokkos::DefaultHostExecutionSpace());
   }
 
   // Distributed hierarchize — unified API, no cart_comm argument.
   paliwa::hierarchize(local_span, full_strided, level_v, min_level_v,
-                       max_level_v, wavelet_name,
-                       Kokkos::DefaultHostExecutionSpace());
+                      max_level_v, wavelet_name,
+                      Kokkos::DefaultHostExecutionSpace());
 
   // Compare distributed result with serial reference.
   {
@@ -308,8 +306,8 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
 
   // Distributed dehierarchize — unified API, no cart_comm argument.
   paliwa::dehierarchize(local_span, full_strided, level_v, min_level_v,
-                         max_level_v, wavelet_name,
-                         Kokkos::DefaultHostExecutionSpace());
+                        max_level_v, wavelet_name,
+                        Kokkos::DefaultHostExecutionSpace());
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
@@ -370,8 +368,7 @@ void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
   auto local_strided =
       paliwa::restrict_strided_with_discrete(full_strided, local_dom);
 
-  ddc::Chunk local_chunk("local", local_strided,
-                          ddc::HostAllocator<double>());
+  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
   auto local_span = local_chunk.span_view();
   ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
   auto orig_span = orig_chunk.span_view();
@@ -382,12 +379,12 @@ void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
   });
 
   paliwa::hierarchize(local_span, full_strided, level_v, min_level_v,
-                       max_level_v, wavelet_name,
-                       Kokkos::DefaultHostExecutionSpace());
+                      max_level_v, wavelet_name,
+                      Kokkos::DefaultHostExecutionSpace());
 
   paliwa::dehierarchize(local_span, full_strided, level_v, min_level_v,
-                         max_level_v, wavelet_name,
-                         Kokkos::DefaultHostExecutionSpace());
+                        max_level_v, wavelet_name,
+                        Kokkos::DefaultHostExecutionSpace());
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
@@ -458,13 +455,12 @@ void distributed_roundtrip_2d_all_wavelets() {
     });
 
     paliwa::hierarchize(ls, full_strided, level_v, min_level_v, max_level_v,
-                         std::string(wn), Kokkos::DefaultHostExecutionSpace());
-    paliwa::dehierarchize(ls, full_strided, level_v, min_level_v,
-                           max_level_v, std::string(wn),
-                           Kokkos::DefaultHostExecutionSpace());
+                        std::string(wn), Kokkos::DefaultHostExecutionSpace());
+    paliwa::dehierarchize(ls, full_strided, level_v, min_level_v, max_level_v,
+                          std::string(wn), Kokkos::DefaultHostExecutionSpace());
 
     ddc::host_for_each(local_strided,
-                        [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
+                       [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
   }
 
   MPI_Comm_free(&sub_comm);
