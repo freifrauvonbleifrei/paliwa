@@ -19,15 +19,7 @@
 #include "../paliwa/paliwa_domains.hpp"
 #include "../paliwa/paliwa_transform.hpp"
 
-// paliwa_distributed_transform.hpp has been removed — its content is
-// now part of paliwa_transform.hpp.  paliwa_transform.hpp pulls in
-// paliwa_distribute.hpp, so no extra include is needed here.
-
 constexpr double pi_dist = std::numbers::pi;
-
-// ============================================================
-// Non-MPI tests — unchanged behaviour, no API impact
-// ============================================================
 
 void test_get_rank_local_domain_along_dim() {
   using Dim = paliwa::DDimV;
@@ -61,7 +53,7 @@ TEST(distribute, get_rank_local_domain_along_dim) {
 void test_classify_ghost_by_coord() {
   using Dim = paliwa::DDimV;
   auto global_dom = ddc::DiscreteDomain<Dim>(ddc::DiscreteElement<Dim>(0),
-                                             ddc::DiscreteVector<Dim>(128));
+                                              ddc::DiscreteVector<Dim>(128));
   using DElem = ddc::DiscreteElement<Dim>;
 
   Kokkos::View<DElem *, Kokkos::SharedSpace> g1("g1", 3);
@@ -135,15 +127,14 @@ void test_classify_ghost_by_rank() {
       ddc::DiscreteVector<Dim>(128));
 
   // decompose() creates the Cartesian communicator and stores it in
-  // process_group.  We only keep the local subdomain.
-  auto local_dom = paliwa::decompose(global_dom, sub_comm,
-                                     std::array<int, 1>{2});
+  // process_group. We only keep the local subdomain.
+  auto local_dom =
+      paliwa::decompose(global_dom, sub_comm, std::array<int, 1>{2});
 
   using DElem = ddc::DiscreteElement<Dim>;
   Kokkos::View<DElem *, Kokkos::SharedSpace> ghost_elems("ghost", 3);
 
-  int my_cart_rank;
-  MPI_Comm_rank(paliwa::process_group::get_cart_comm(), &my_cart_rank);
+  int my_cart_rank = paliwa::process_group::my_rank();
   if (my_cart_rank == 0) {
     ghost_elems(0) = DElem(64);
     ghost_elems(1) = DElem(66);
@@ -183,8 +174,9 @@ TEST(distributed, classify_ghost_by_rank) { test_classify_ghost_by_rank(); }
 //
 // Changes from old version:
 //   - decompose_domain_on_communicator → paliwa::decompose()
-//   - distributed_hierarchize/dehierarchize → paliwa::hierarchize/dehierarchize
-//     (unified call, no cart_comm argument)
+//   - distributed_hierarchize/dehierarchize →
+//     paliwa::hierarchize/dehierarchize (unified call, no cart_comm
+//     argument)
 //   - Serial reference path uses paliwa::hierarchize with full_strided
 //     (the new unified signature requires full_strided explicitly)
 //   - MPI_Comm_free(&cart_comm) removed — process_group owns it
@@ -211,8 +203,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   ddc::DiscreteDomain<Dim> global_dom;
   if (ddc::is_discrete_space_initialized<Dim>()) {
     global_dom = ddc::DiscreteDomain<Dim>(
-        ddc::DiscreteElement<Dim>(0),
-        ddc::DiscreteVector<Dim>(global_size));
+        ddc::DiscreteElement<Dim>(0), ddc::DiscreteVector<Dim>(global_size));
   } else {
     global_dom = paliwa::initialize_dim_periodic_unit_interval<Dim>(
         ddc::DiscreteVector<Dim>(global_size));
@@ -224,22 +215,23 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   DVect max_level_v(std::array<long int, 1>{max_level});
 
   // decompose() stores the Cartesian communicator in process_group.
-  auto local_dom = paliwa::decompose(global_dom, sub_comm,
-                                     std::array<int, 1>{2});
+  auto local_dom =
+      paliwa::decompose(global_dom, sub_comm, std::array<int, 1>{2});
 
   auto full_strided = paliwa::strided_domain_from_level<Dim>(
       ddc::detail::array(level_v), ddc::detail::array(max_level_v));
   auto local_strided =
       paliwa::restrict_strided_with_discrete(full_strided, local_dom);
 
-  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
+  ddc::Chunk local_chunk("local", local_strided,
+                          ddc::HostAllocator<double>());
   auto local_span = local_chunk.span_view();
   ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
   auto orig_span = orig_chunk.span_view();
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> elem) {
     local_span(elem) = std::sin(2.0 * pi_dist * ddc::coordinate(elem));
-    orig_span(elem)  = local_span(elem);
+    orig_span(elem) = local_span(elem);
   });
 
   // Build a serial reference on rank 0 by gathering all data.
@@ -250,16 +242,14 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
     int n = static_cast<int>(local_strided.size());
     std::vector<double> vals(n);
     std::size_t idx = 0;
-    ddc::host_for_each(local_strided,
-                       [&](ddc::DiscreteElement<Dim> e) {
-                         vals[idx++] = local_span(e);
-                       });
+    ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+      vals[idx++] = local_span(e);
+    });
     if (world_rank == 0) {
       idx = 0;
-      ddc::host_for_each(local_strided,
-                         [&](ddc::DiscreteElement<Dim> e) {
-                           serial_span(e) = vals[idx++];
-                         });
+      ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+        serial_span(e) = vals[idx++];
+      });
       std::vector<double> remote(n);
       MPI_Recv(remote.data(), n, MPI_DOUBLE, 1, 99, sub_comm,
                MPI_STATUS_IGNORE);
@@ -267,11 +257,8 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
       ddc::host_for_each(
           paliwa::restrict_strided_with_discrete(
               full_strided,
-              paliwa::get_rank_local_domain_along_dim<Dim>(
-                  global_dom, 2, 1)),
-          [&](ddc::DiscreteElement<Dim> e) {
-            serial_span(e) = remote[idx++];
-          });
+              paliwa::get_rank_local_domain_along_dim<Dim>(global_dom, 2, 1)),
+          [&](ddc::DiscreteElement<Dim> e) { serial_span(e) = remote[idx++]; });
     } else {
       MPI_Send(vals.data(), n, MPI_DOUBLE, 0, 99, sub_comm);
     }
@@ -281,30 +268,28 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   // hierarchize now always takes full_strided explicitly.
   if (world_rank == 0) {
     paliwa::hierarchize(serial_span, full_strided, level_v, min_level_v,
-                        max_level_v, wavelet_name,
-                        Kokkos::DefaultHostExecutionSpace());
+                         max_level_v, wavelet_name,
+                         Kokkos::DefaultHostExecutionSpace());
   }
 
   // Distributed hierarchize — unified API, no cart_comm argument.
   paliwa::hierarchize(local_span, full_strided, level_v, min_level_v,
-                      max_level_v, wavelet_name,
-                      Kokkos::DefaultHostExecutionSpace());
+                       max_level_v, wavelet_name,
+                       Kokkos::DefaultHostExecutionSpace());
 
   // Compare distributed result with serial reference.
   {
     int n = static_cast<int>(local_strided.size());
     std::vector<double> vals(n);
     std::size_t idx = 0;
-    ddc::host_for_each(local_strided,
-                       [&](ddc::DiscreteElement<Dim> e) {
-                         vals[idx++] = local_span(e);
-                       });
+    ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+      vals[idx++] = local_span(e);
+    });
     if (world_rank == 0) {
       idx = 0;
-      ddc::host_for_each(local_strided,
-                         [&](ddc::DiscreteElement<Dim> e) {
-                           EXPECT_NEAR(vals[idx++], serial_span(e), 1e-12);
-                         });
+      ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
+        EXPECT_NEAR(vals[idx++], serial_span(e), 1e-12);
+      });
       std::vector<double> remote(n);
       MPI_Recv(remote.data(), n, MPI_DOUBLE, 1, 100, sub_comm,
                MPI_STATUS_IGNORE);
@@ -312,8 +297,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
       ddc::host_for_each(
           paliwa::restrict_strided_with_discrete(
               full_strided,
-              paliwa::get_rank_local_domain_along_dim<Dim>(
-                  global_dom, 2, 1)),
+              paliwa::get_rank_local_domain_along_dim<Dim>(global_dom, 2, 1)),
           [&](ddc::DiscreteElement<Dim> e) {
             EXPECT_NEAR(remote[idx++], serial_span(e), 1e-12);
           });
@@ -324,8 +308,8 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
 
   // Distributed dehierarchize — unified API, no cart_comm argument.
   paliwa::dehierarchize(local_span, full_strided, level_v, min_level_v,
-                        max_level_v, wavelet_name,
-                        Kokkos::DefaultHostExecutionSpace());
+                         max_level_v, wavelet_name,
+                         Kokkos::DefaultHostExecutionSpace());
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
@@ -337,10 +321,10 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
 
 void roundtrip_1d_hat() { test_distributed_roundtrip_1d("hat"); }
 void roundtrip_1d_bio() { test_distributed_roundtrip_1d("biorthogonal"); }
-void roundtrip_1d_fw()  { test_distributed_roundtrip_1d("fullweighting"); }
-TEST(distributed, roundtrip_1d_hat)          { roundtrip_1d_hat(); }
+void roundtrip_1d_fw() { test_distributed_roundtrip_1d("fullweighting"); }
+TEST(distributed, roundtrip_1d_hat) { roundtrip_1d_hat(); }
 TEST(distributed, roundtrip_1d_biorthogonal) { roundtrip_1d_bio(); }
-TEST(distributed, roundtrip_1d_fullweighting){ roundtrip_1d_fw();  }
+TEST(distributed, roundtrip_1d_fullweighting) { roundtrip_1d_fw(); }
 
 // -------------------------------------------------------
 // 1-D roundtrip, 8 ranks
@@ -367,8 +351,7 @@ void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
   ddc::DiscreteDomain<Dim> global_dom;
   if (ddc::is_discrete_space_initialized<Dim>()) {
     global_dom = ddc::DiscreteDomain<Dim>(
-        ddc::DiscreteElement<Dim>(0),
-        ddc::DiscreteVector<Dim>(global_size));
+        ddc::DiscreteElement<Dim>(0), ddc::DiscreteVector<Dim>(global_size));
   } else {
     global_dom = paliwa::initialize_dim_periodic_unit_interval<Dim>(
         ddc::DiscreteVector<Dim>(global_size));
@@ -379,31 +362,32 @@ void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
   DVect min_level_v(std::array<long int, 1>{min_level});
   DVect max_level_v(std::array<long int, 1>{max_level});
 
-  auto local_dom = paliwa::decompose(global_dom, sub_comm,
-                                     std::array<int, 1>{8});
+  auto local_dom =
+      paliwa::decompose(global_dom, sub_comm, std::array<int, 1>{8});
 
   auto full_strided = paliwa::strided_domain_from_level<Dim>(
       ddc::detail::array(level_v), ddc::detail::array(max_level_v));
   auto local_strided =
       paliwa::restrict_strided_with_discrete(full_strided, local_dom);
 
-  ddc::Chunk local_chunk("local", local_strided, ddc::HostAllocator<double>());
+  ddc::Chunk local_chunk("local", local_strided,
+                          ddc::HostAllocator<double>());
   auto local_span = local_chunk.span_view();
   ddc::Chunk orig_chunk("orig", local_strided, ddc::HostAllocator<double>());
   auto orig_span = orig_chunk.span_view();
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     local_span(e) = std::sin(2.0 * pi_dist * ddc::coordinate(e));
-    orig_span(e)  = local_span(e);
+    orig_span(e) = local_span(e);
   });
 
   paliwa::hierarchize(local_span, full_strided, level_v, min_level_v,
-                      max_level_v, wavelet_name,
-                      Kokkos::DefaultHostExecutionSpace());
+                       max_level_v, wavelet_name,
+                       Kokkos::DefaultHostExecutionSpace());
 
   paliwa::dehierarchize(local_span, full_strided, level_v, min_level_v,
-                        max_level_v, wavelet_name,
-                        Kokkos::DefaultHostExecutionSpace());
+                         max_level_v, wavelet_name,
+                         Kokkos::DefaultHostExecutionSpace());
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
@@ -426,8 +410,8 @@ TEST(distributed, roundtrip_1d_8ranks_fullweighting) {
 // 2-D roundtrip, 4 ranks (2×2 decomposition)
 // -------------------------------------------------------
 void distributed_roundtrip_2d_all_wavelets() {
-  using DimX  = paliwa::DDimY;
-  using DimY  = paliwa::DDimZ;
+  using DimX = paliwa::DDimY;
+  using DimY = paliwa::DDimZ;
   using DElem = ddc::DiscreteElement<DimX, DimY>;
   using DVect = ddc::DiscreteVector<DimX, DimY>;
 
@@ -452,8 +436,8 @@ void distributed_roundtrip_2d_all_wavelets() {
   DVect min_level_v(std::array<long int, 2>{1, 2});
   DVect max_level_v(std::array<long int, 2>{6, 7});
 
-  auto local_dom = paliwa::decompose(global_dom, sub_comm,
-                                     std::array<int, 2>{2, 2});
+  auto local_dom =
+      paliwa::decompose(global_dom, sub_comm, std::array<int, 2>{2, 2});
 
   auto full_strided = paliwa::strided_domain_from_level<DimX, DimY>(
       ddc::detail::array(level_v), ddc::detail::array(max_level_v));
@@ -469,20 +453,18 @@ void distributed_roundtrip_2d_all_wavelets() {
 
     ddc::host_for_each(local_strided, [&](DElem e) {
       auto c = ddc::coordinate(e).array();
-      ls(e) = std::sin(2.0 * pi_dist * c[0]) *
-              std::sin(2.0 * pi_dist * c[1]);
+      ls(e) = std::sin(2.0 * pi_dist * c[0]) * std::sin(2.0 * pi_dist * c[1]);
       os(e) = ls(e);
     });
 
     paliwa::hierarchize(ls, full_strided, level_v, min_level_v, max_level_v,
-                        std::string(wn),
-                        Kokkos::DefaultHostExecutionSpace());
-    paliwa::dehierarchize(ls, full_strided, level_v, min_level_v, max_level_v,
-                          std::string(wn),
-                          Kokkos::DefaultHostExecutionSpace());
+                         std::string(wn), Kokkos::DefaultHostExecutionSpace());
+    paliwa::dehierarchize(ls, full_strided, level_v, min_level_v,
+                           max_level_v, std::string(wn),
+                           Kokkos::DefaultHostExecutionSpace());
 
     ddc::host_for_each(local_strided,
-                       [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
+                        [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
   }
 
   MPI_Comm_free(&sub_comm);

@@ -14,12 +14,6 @@ struct Y {};
 struct DDimX : ddc::UniformPointSampling<X> {};
 struct DDimY : ddc::UniformPointSampling<Y> {};
 
-// hierarchize/dehierarchize now require the full strided domain as their
-// second argument.  On a single process the full domain equals the span's
-// own domain, so we pass strided_domain directly.  No other changes are
-// needed: these tests are purely local, so process_group holds
-// MPI_COMM_NULL and all communication paths compile to no-ops.
-
 void test_transform_hat_stays_same_2d() {
   using SDDom = ddc::StridedDiscreteDomain<DDimX, DDimY>;
   using DElem = ddc::DiscreteElement<DDimX, DDimY>;
@@ -57,7 +51,6 @@ void test_transform_hat_stays_same_2d() {
       auto strided_grid_host_before = ddc::create_mirror_and_copy(
           Kokkos::SharedHostPinnedSpace(), strided_grid);
 
-      // Single-process call: full_strided_domain == strided_domain.
       paliwa::hierarchize(strided_grid, strided_domain, level, minimum_level,
                           maximum_level, "hat",
                           Kokkos::DefaultExecutionSpace());
@@ -137,7 +130,6 @@ void test_transform_mass_conservation_2d(std::string const &wavelet_name) {
               ddc::reducer::sum<double>(), strided_grid) /
           strided_domain.size();
 
-      // Single-process call: full_strided_domain == strided_domain.
       paliwa::hierarchize(strided_grid, strided_domain, level, minimum_level,
                           maximum_level, wavelet_name,
                           Kokkos::DefaultExecutionSpace());

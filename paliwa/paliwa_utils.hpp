@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <cassert>
+#include <cstddef>
+#include <functional>
+
 namespace paliwa {
 
 template <typename T> // with T for example std::array<long int, dimensionality>

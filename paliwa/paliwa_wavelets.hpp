@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <array>
+#include <map>
+#include <utility>
 #include <vector>
 
 namespace paliwa {

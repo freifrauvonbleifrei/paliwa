@@ -4,15 +4,23 @@
 
 #pragma once
 
-#include <ddc/ddc.hpp>
+#include <array>
+#include <cassert>
+#include <cmath>
+#include <functional>
+#include <ranges>
+#include <type_traits>
+#include <utility>
 #include <vector>
+
+#include <ddc/ddc.hpp>
 
 namespace paliwa {
 
 template <typename DimToReplace, typename... DDims>
 constexpr auto replace_dim(ddc::DiscreteElement<DDims...> base,
-                           ddc::DiscreteElement<DimToReplace> d_elem) {
-  /// Replace one dimension's component in a multi-D DiscreteElement
+                            ddc::DiscreteElement<DimToReplace> d_elem) {
+  // Replace one dimension's component in a multi-D DiscreteElement
   return ddc::DiscreteElement<DDims...>([&]() -> ddc::DiscreteElement<DDims> {
     if constexpr (std::is_same_v<DDims, DimToReplace>) {
       return ddc::DiscreteElement<DDims>(d_elem);
@@ -30,11 +38,11 @@ constexpr ddc::StridedDiscreteDomain<DDims...> strided_domain_from_level(
   constexpr size_t dimensionality = sizeof...(DDims);
   std::array<long int, dimensionality> resolution, level_diff, stride;
   std::ranges::transform(level, resolution.begin(),
-                         [](long int l) { return (1 << l); });
+                          [](long int l) { return (1 << l); });
   std::ranges::transform(level, finest_level, level_diff.begin(),
-                         [](long int l, long int ml) { return ml - l; });
+                          [](long int l, long int ml) { return ml - l; });
   std::ranges::transform(level_diff, stride.begin(),
-                         [](long int l) { return (1 << l); });
+                          [](long int l) { return (1 << l); });
   ddc::DiscreteVector<DDims...> strides_all(stride);
   return ddc::StridedDiscreteDomain<DDims...>(
       lbound, ddc::DiscreteVector<DDims...>(resolution), strides_all);
@@ -49,18 +57,18 @@ strided_hierarchical_domain_from_level(
   constexpr size_t dimensionality = sizeof...(DDims);
   std::array<long int, dimensionality> resolution, level_diff, half_stride;
   std::ranges::transform(level, resolution.begin(),
-                         [](long int ml) { return (1 << (ml - 1)); });
+                          [](long int ml) { return (1 << (ml - 1)); });
   std::ranges::transform(level, finest_level, level_diff.begin(),
-                         [](long int l, long int ml) { return ml - l; });
+                          [](long int l, long int ml) { return ml - l; });
   std::ranges::transform(level_diff, half_stride.begin(),
-                         [](long int l) { return (1 << l); });
-  // special case level 0
+                          [](long int l) { return (1 << l); });
+  // Special case level 0
   for (size_t i = 0; i < dimensionality; ++i) {
     assert(level[i] <= finest_level[i]);
     assert(level[i] >= 0);
     if (level[i] == 0) {
-      resolution[i] = 1;  // the coarsest level has one point
-      half_stride[i] = 0; // no offset
+      resolution[i] = 1;
+      half_stride[i] = 0;
     }
   }
   ddc::DiscreteVector<DDims...> resolution_all(resolution);
@@ -68,10 +76,10 @@ strided_hierarchical_domain_from_level(
   ddc::DiscreteElement<DDims...> start_all = lbound + half_stride_vect;
   std::array<long int, dimensionality> stride;
   std::ranges::transform(level_diff, stride.begin(),
-                         [](long int l) { return (1 << (l + 1)); });
+                          [](long int l) { return (1 << (l + 1)); });
   ddc::DiscreteVector<DDims...> strides_all(stride);
   return ddc::StridedDiscreteDomain<DDims...>(start_all, resolution_all,
-                                              strides_all);
+                                               strides_all);
 }
 
 template <typename DDimInWhichItsOdd, typename... DDims>
@@ -86,11 +94,12 @@ constexpr ddc::StridedDiscreteDomain<DDims...> odd_strided_domain_from_domain(
   extent_odd.template get<DDimInWhichItsOdd>() =
       (extent_odd.template get<DDimInWhichItsOdd>()) / 2;
   return ddc::StridedDiscreteDomain<DDims...>(lbound + odd_offset, extent_odd,
-                                              strides_odd);
+                                               strides_odd);
 }
 
 template <typename DDimInWhichItsEven, typename... DDims>
-constexpr ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
+constexpr ddc::StridedDiscreteDomain<DDims...>
+even_strided_domain_from_domain(
     ddc::StridedDiscreteDomain<DDims...> const &domain,
     ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
   ddc::DiscreteVector<DDims...> strides_even = domain.strides();
@@ -99,11 +108,12 @@ constexpr ddc::StridedDiscreteDomain<DDims...> even_strided_domain_from_domain(
   extent_even.template get<DDimInWhichItsEven>() =
       (extent_even.template get<DDimInWhichItsEven>()) / 2;
   return ddc::StridedDiscreteDomain<DDims...>(lbound, extent_even,
-                                              strides_even);
+                                               strides_even);
 }
 
 template <typename... DDims>
-constexpr std::vector<ddc::StridedDiscreteDomain<DDims...>> get_strided_domains(
+constexpr std::vector<ddc::StridedDiscreteDomain<DDims...>>
+get_strided_domains(
     std::vector<std::array<long int, sizeof...(DDims)>> const &all_levels,
     std::array<long int, sizeof...(DDims)> maximum_level,
     ddc::DiscreteElement<DDims...> lbound = ddc::DiscreteElement<DDims...>()) {
@@ -135,12 +145,12 @@ constexpr ddc::DiscreteElement<HeadTag, Tags...> get_intersected_begin(
     ddc::DiscreteElement<HeadTag, Tags...> const &strided_begin,
     ddc::DiscreteVector<HeadTag, Tags...> const &strides,
     OtherElementType const &other_begin) {
-  // get the first element in strided that's >= other_begin
+  // Get the first element in strided that's >= other_begin
   auto const stride = ddc::select<HeadTag>(strides);
   auto const strided_begin_head = ddc::select<HeadTag>(strided_begin);
   auto const other_or_same_begin = ddc::select_or<HeadTag>(
       other_begin,
-      strided_begin_head); // in case other_begin does not have this dim
+      strided_begin_head); // In case other_begin does not have this dim
   ddc::DiscreteElement<HeadTag> new_head_begin =
       strided_begin_head +
       ddc::DiscreteVector<HeadTag>(
@@ -166,9 +176,9 @@ constexpr ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
   ddc::DiscreteVector<HeadTag> head_result;
   if constexpr (ddc::in_tags_v<HeadTag, ddc::detail::TypeSeq<OtherTags...>>) {
     ddc::detail::array(head_result) = {(ddc::select<HeadTag>(other_back) -
-                                        ddc::select<HeadTag>(strided_begin)) /
-                                           strides.template get<HeadTag>() +
-                                       1};
+                                         ddc::select<HeadTag>(strided_begin)) /
+                                            strides.template get<HeadTag>() +
+                                        1};
   } else {
     head_result = ddc::select<HeadTag>(strided_extents);
   }
@@ -178,9 +188,9 @@ constexpr ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
     return ddc::DiscreteVector<HeadTag, Tags...>(
         head_result,
         get_intersected_extent(ddc::select<Tags...>(strided_begin),
-                               ddc::select<Tags...>(strides),
-                               ddc::select<Tags...>(strided_extents),
-                               ddc::select<OtherTags...>(other_back)));
+                                ddc::select<Tags...>(strides),
+                                ddc::select<Tags...>(strided_extents),
+                                ddc::select<OtherTags...>(other_back)));
   }
 }
 
@@ -188,8 +198,8 @@ template <typename DDom, typename... DDims>
 constexpr auto restrict_strided_with_discrete(
     ddc::StridedDiscreteDomain<DDims...> const &thisdomain,
     DDom const &odomain) {
-  // return new strided domain that is the intersection of thisdomain and
-  // odomain similar to
+  // Return new strided domain that is the intersection of thisdomain and
+  // odomain, similar to
   // https://github.com/CExA-project/ddc/blob/d60eec09/include/ddc/discrete_domain.hpp#L197
   // KOKKOS_ASSERT(((DiscreteElement<ODDims>(m_element_begin) <=
   //                 DiscreteElement<ODDims>(odomain.m_element_begin)) &&
@@ -202,7 +212,7 @@ constexpr auto restrict_strided_with_discrete(
   auto newextents = get_intersected_extent(
       newbegin, thisdomain.strides(), thisdomain.extents(), odomain.back());
   return ddc::StridedDiscreteDomain<DDims...>(newbegin, newextents,
-                                              thisdomain.strides());
+                                               thisdomain.strides());
 }
 
 template <typename DDim, typename DomainType>
@@ -215,7 +225,7 @@ constexpr ddc::SparseDiscreteDomain<DDim> restrict_sparse_with_other_domain(
   auto other_domain_projected = ddc::select<DDim>(other_domain);
   size_t insert_index = 0;
   ddc::host_for_each(sparse_domain, [&elements, &insert_index,
-                                     &other_domain_projected](DElem ixyz) {
+                                      &other_domain_projected](DElem ixyz) {
     if (other_domain_projected.contains(ixyz)) {
       elements(insert_index++) = DElem(ixyz);
     }
@@ -242,7 +252,7 @@ constexpr auto sparse_from_strided_domain(
     ddc::StridedDiscreteDomain<DDim> const &strided_domain) {
   using DElem = ddc::DiscreteElement<DDim>;
   Kokkos::View<DElem *, Kokkos::SharedSpace> elements("sparse_elements",
-                                                      strided_domain.size());
+                                                       strided_domain.size());
   size_t insert_index = 0;
   ddc::host_for_each(strided_domain, [&elements, &insert_index](DElem ixyz) {
     elements(insert_index++) = ixyz;
