@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+#
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
 if(PALIWA_BUILD_BENCHMARKS)
     add_executable(
         paliwa_benchmarks_regression

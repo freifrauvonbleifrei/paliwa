@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# SPDX-FileCopyrightText: 2025 The paliwa development team, see COPYRIGHT.md file
+#
+# SPDX-License-Identifier: LGPL-3.0-or-later
+
+
 """Plot Google Benchmark JSON results.
 
 Usage:
