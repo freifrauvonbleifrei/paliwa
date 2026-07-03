@@ -50,11 +50,20 @@ struct MPIOptionalGuard {
   }
   ~MPIOptionalGuard() {
 #ifdef PALIWA_WITH_MPI
+    process_group_release_at_exit();
     MPI_Finalize();
 #endif
   }
   MPIOptionalGuard(MPIOptionalGuard const &) = delete;
   MPIOptionalGuard &operator=(MPIOptionalGuard const &) = delete;
+
+private:
+#ifdef PALIWA_WITH_MPI
+  // Forward-declared free function, defined after process_group below,
+  // so the destructor here doesn't need process_group's full definition
+  // at this point in the file.
+  static void process_group_release_at_exit();
+#endif
 };
 
 // ============================================================
@@ -62,17 +71,67 @@ struct MPIOptionalGuard {
 // ============================================================
 // Stores the Cartesian communicator together with cached topology
 // information (dimensions, coordinates, and coordinate-to-rank lookup).
-// The cache is initialized by decompose() and avoids repeated MPI
-// topology queries during ghost exchanges.
+//
+// Public, version-stable entry points (safe for external code to
+// depend on across paliwa releases):
+//
+//   process_group::init_topology(comm, par_vector)
+//       Sets up (or replaces) the Cartesian communicator and topology
+//       cache. This is the only function in this file that makes
+//       topology-altering MPI calls (MPI_Dims_create, MPI_Cart_create).
+//       Call this once per distinct process-grid shape; it is cheap
+//       to call again (any previous communicator is freed first), but
+//       there's no reason to call it more than once for a fixed
+//       par_vector.
+//
+//   process_group::localize(global_domain)
+//       Pure index arithmetic, no MPI calls. Computes the rank-local
+//       subdomain for global_domain against the currently cached
+//       topology. Safe and cheap to call repeatedly, including once
+//       per sparse-grid component domain sharing the same process
+//       group with different global extents.
+//
+//   decompose(global_domain, comm, par_vector)
+//       Convenience wrapper: init_topology(comm, par_vector) followed
+//       by localize(global_domain). Kept for existing single-domain
+//       call sites and tests; equivalent to calling the two steps
+//       separately.
+//
+// Everything else (ghost classification, peer exchange, slice
+// exchange) is an internal implementation detail of the current
+// nearest-neighbour ghost-exchange model and is expected to change,
+// likely to be replaced outright, when the MPI pencil-transpose path
+// lands. Do not treat those signatures as stable.
 
 struct process_group {
   process_group() = delete; // Purely static interface.
 
   // ----------------------------------------------------------
-  // Accessors for the communicator
+  // Public, stable accessors
   // ----------------------------------------------------------
 
   static MPICommType get_cart_comm() { return get_state().m_cart_comm; }
+
+  /// Free any communicator currently held. Safe to call multiple
+  /// times (idempotent) and safe to call when nothing is held.
+  /// Must be called before MPI_Finalize if init_topology() was ever
+  /// called; MPIOptionalGuard's destructor does this automatically
+  /// when paliwa owns MPI_Init/MPI_Finalize itself.
+  static void release() {
+    State &s = get_state();
+#ifdef PALIWA_WITH_MPI
+    if (s.m_cart_comm != MPI_COMM_NULL) {
+      MPI_Comm_free(&s.m_cart_comm);
+    }
+    s.m_n_dims = 0;
+    s.m_my_rank = -1;
+    s.m_max_ranks_per_dim = 0;
+    s.m_cart_dims.clear();
+    s.m_my_coords.clear();
+    s.m_coord_to_rank.clear();
+#endif
+    s.m_cart_comm = MPI_COMM_NULL;
+  }
 
 #ifdef PALIWA_WITH_MPI
   // ----------------------------------------------------------
@@ -104,6 +163,124 @@ struct process_group {
   }
 #endif // PALIWA_WITH_MPI
 
+  // ----------------------------------------------------------
+  // Public, stable entry points
+  // ----------------------------------------------------------
+
+  /**
+   * @brief Establish (or replace) the Cartesian process-grid topology.
+   *
+   * par_vector entries follow MPI_Dims_create semantics: a nonzero
+   * entry pins the number of ranks along that dimension; a zero entry
+   * (the default, i.e. par_vector = {}) is filled in automatically by
+   * MPI to balance the remaining ranks across the unconstrained
+   * dimensions.
+   *
+   * IMPORTANT: when paliwa is used as a component backend inside a
+   * larger solver that already owns the process-grid decomposition
+   * (e.g. a combination-technique driver assigning process groups per
+   * component grid), the caller MUST pass the par_vector matching that
+   * externally-imposed decomposition. Leaving par_vector as the
+   * default {0,...} lets this function invent its own balanced
+   * topology, which has no knowledge of and may conflict with a
+   * decomposition already fixed elsewhere. The zero-default exists for
+   * standalone use (tests, or paliwa driving its own communicator
+   * directly), not for embedded use under an external solver.
+   *
+   * Without MPI, par_vector must be all-zero or all-one; the stored
+   * communicator becomes null and every subsequent localize() call
+   * returns the global domain unchanged.
+   *
+   * Any communicator previously held by process_group is freed before
+   * the new one is created, so calling this repeatedly (e.g. across
+   * gtest cases in one binary) does not leak. The very last
+   * communicator created still needs an explicit release() (or
+   * reliance on MPIOptionalGuard's destructor) before MPI_Finalize.
+   */
+  template <std::size_t Rank>
+  static void init_topology(MPICommType comm,
+                            std::array<int, Rank> par_vector = {}) {
+#ifndef PALIWA_WITH_MPI
+    assert(std::all_of(par_vector.begin(), par_vector.end(),
+                       [](int i) { return i == 0 || i == 1; }));
+    (void)comm;
+    set_state(MPI_COMM_NULL);
+#else
+    int comm_size = -1;
+    MPI_Comm_size(comm, &comm_size);
+
+    // Fills in any zero entries, balancing ranks across them; leaves
+    // nonzero (pinned) entries untouched. A no-op, other than MPI
+    // validating the product against comm_size, when par_vector is
+    // already fully specified.
+    MPI_Dims_create(comm_size, static_cast<int>(Rank), par_vector.data());
+
+#ifndef NDEBUG
+    {
+      int n = std::reduce(par_vector.begin(), par_vector.end(), 1,
+                          std::multiplies<int>());
+      assert(n == comm_size);
+    }
+#endif
+
+    std::array<int, Rank> periods;
+    periods.fill(1); // Periodic in every dimension.
+
+    MPI_Comm cart_comm = MPI_COMM_NULL;
+    MPI_Cart_create(comm, static_cast<int>(Rank), par_vector.data(),
+                    periods.data(), /*reorder=*/true, &cart_comm);
+
+    set_state(cart_comm);
+#endif // PALIWA_WITH_MPI
+  }
+
+  /**
+   * @brief Compute the rank-local subdomain of global_domain against
+   *        the currently cached topology.
+   *
+   * Pure index arithmetic — makes no MPI calls. Safe and cheap to call
+   * repeatedly, including once per sparse-grid component domain that
+   * shares the same process group but has a different global extent;
+   * there is no need to cache or memoize the result on the caller's
+   * side.
+   *
+   * init_topology() must have been called first (directly, or via
+   * decompose()); its cached rank/coordinate table drives this
+   * function's arithmetic, but this function itself performs no
+   * communication.
+   */
+  template <typename DiscreteDomainType>
+  static DiscreteDomainType localize(DiscreteDomainType const &global_domain) {
+    static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,
+                  "DiscreteDomainType must be a DDC discrete domain type");
+    constexpr std::size_t dimensionality = DiscreteDomainType::rank();
+    using DVect = typename DiscreteDomainType::discrete_vector_type;
+
+    State const &s = get_state();
+
+#ifndef PALIWA_WITH_MPI
+    (void)s;
+    return global_domain;
+#else
+    if (s.m_cart_comm == MPI_COMM_NULL) {
+      return global_domain;
+    }
+
+    assert(s.m_n_dims == static_cast<int>(dimensionality));
+
+    DVect par_vector_dv;
+    DVect my_coords_dv;
+    for (std::size_t d = 0; d < dimensionality; ++d) {
+      ddc::detail::array(par_vector_dv)[d] =
+          static_cast<long int>(s.m_cart_dims[d]);
+      ddc::detail::array(my_coords_dv)[d] =
+          static_cast<long int>(s.m_my_coords[d]);
+    }
+
+    return distribute_idx_range(global_domain, par_vector_dv, my_coords_dv);
+#endif
+  }
+
 private:
   struct State {
     MPICommType m_cart_comm = MPI_COMM_NULL;
@@ -127,6 +304,13 @@ private:
 
   static void set_state(MPICommType comm) {
     State &s = get_state();
+
+#ifdef PALIWA_WITH_MPI
+    if (s.m_cart_comm != MPI_COMM_NULL) {
+      MPI_Comm_free(&s.m_cart_comm);
+    }
+#endif
+
     s.m_cart_comm = comm;
 
 #ifdef PALIWA_WITH_MPI
@@ -171,13 +355,13 @@ private:
     }
 #endif // PALIWA_WITH_MPI
   }
-
-  // Only decompose() may call set_state().
-  template <typename DiscreteDomainType>
-  friend DiscreteDomainType
-  decompose(DiscreteDomainType const &, MPICommType,
-            std::array<int, DiscreteDomainType::rank()> const &);
 };
+
+#ifdef PALIWA_WITH_MPI
+inline void MPIOptionalGuard::process_group_release_at_exit() {
+  process_group::release();
+}
+#endif
 
 #ifdef PALIWA_WITH_MPI
 
@@ -212,6 +396,11 @@ template <typename T> struct MPIValueType {
 
 #endif // PALIWA_WITH_MPI
 
+// ============================================================
+// Section — internal: index-range distribution
+// ============================================================
+// Pure arithmetic, no MPI calls. Used by process_group::localize().
+
 template <class HeadTag, class... Tags>
 constexpr ddc::DiscreteDomain<HeadTag, Tags...>
 distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
@@ -242,6 +431,15 @@ distribute_idx_range(ddc::DiscreteDomain<HeadTag, Tags...> global_idx_range,
                                        ddc::select<Tags...>(my_coords)));
   }
 }
+
+// ============================================================
+// Section — internal: nearest-neighbour ghost exchange
+// ============================================================
+// Everything below is an implementation detail of the current
+// single-hop ghost-exchange model, valid as long as filter width
+// keeps ghost data on the immediately neighbouring rank. NOT part of
+// the stable external interface — expect this section to be replaced
+// by the MPI pencil-transpose path.
 
 template <typename Dim>
 constexpr ddc::DiscreteDomain<Dim> get_rank_local_domain_along_dim(
@@ -534,76 +732,40 @@ void exchange_ghost_slices(
 }
 
 // ============================================================
-// Section 8 — decompose (primary public API)
+// Section — public, stable: decompose (convenience wrapper)
 // ============================================================
 
 /**
- * @brief Decompose a global domain across MPI ranks and initialize the
- *        process_group communicator and topology cache.
+ * @brief Decompose a global domain across MPI ranks: establishes (or
+ *        replaces) the process-grid topology and returns this rank's
+ *        local subdomain.
  *
- * This is the single entry point a user calls at startup:
+ *   auto local_domain = paliwa::decompose(global, MPI_COMM_WORLD);
+ *   // or pin specific dimensions, leave the rest automatic:
+ *   auto local_domain = paliwa::decompose(global, MPI_COMM_WORLD, {4, 0});
+ *   // or fully explicit:
+ *   auto local_domain = paliwa::decompose(global, MPI_COMM_WORLD, {2, 2});
  *
- *   auto local_domain =
- *       paliwa::decompose(global, MPI_COMM_WORLD, {2, 4});
+ * Equivalent to, and implemented directly as:
  *
- * Internally a periodic Cartesian communicator is created from comm and
- * par_vector. The communicator and a full topology cache (dims, coords,
- * coordinate-to-rank table) are stored in process_group::State so that
- * all subsequent calls to classify_ghost_by_rank and
- * compute_peer_exchanges require zero MPI calls at runtime.
+ *   process_group::init_topology(comm, par_vector);
+ *   return process_group::localize(global_domain);
  *
- * Without MPI, par_vector must be all-ones; the global domain is returned
- * unchanged and the stored communicator is nullptr.
+ * For repeated use against multiple global domains sharing one
+ * process group (e.g. sparse-grid component domains), prefer calling
+ * init_topology() once and localize() per domain directly, rather
+ * than calling decompose() again for each — decompose() re-runs
+ * init_topology() (and therefore MPI_Cart_create) every time.
+ *
+ * par_vector and the embedding-solver caveat about leaving it as the
+ * default are documented on process_group::init_topology().
  */
 template <typename DiscreteDomainType>
 DiscreteDomainType
 decompose(DiscreteDomainType const &global_domain, MPICommType comm,
-          std::array<int, DiscreteDomainType::rank()> const &par_vector) {
-  static_assert(ddc::is_discrete_domain_v<DiscreteDomainType>,
-                "DiscreteDomainType must be a DDC discrete domain type");
-
-#ifndef PALIWA_WITH_MPI
-  assert(std::all_of(par_vector.begin(), par_vector.end(),
-                     [](int i) { return i == 1; }));
-  (void)comm;
-  process_group::set_state(MPI_COMM_NULL);
-  return global_domain;
-#else
-  constexpr std::size_t dimensionality = DiscreteDomainType::rank();
-  using DVect = typename DiscreteDomainType::discrete_vector_type;
-
-#ifndef NDEBUG
-  {
-    int n = std::reduce(par_vector.begin(), par_vector.end(), 1,
-                        std::multiplies<int>());
-    int comm_size = -1;
-    MPI_Comm_size(comm, &comm_size);
-    assert(n == comm_size);
-  }
-#endif
-
-  std::array<int, dimensionality> periods;
-  periods.fill(1); // Periodic in every dimension.
-
-  MPI_Comm cart_comm = MPI_COMM_NULL;
-  MPI_Cart_create(comm, static_cast<int>(dimensionality), par_vector.data(),
-                  periods.data(), /*reorder=*/true, &cart_comm);
-
-  // set_state builds the full topology cache from cart_comm.
-  process_group::set_state(cart_comm);
-
-  // Use the already-cached coords to compute the local subdomain — no
-  // further MPI calls needed.
-  DVect par_vector_dv;
-  std::ranges::transform(par_vector, ddc::detail::array(par_vector_dv).begin(),
-                         [](int i) { return static_cast<long int>(i); });
-  DVect my_coords_dv;
-  for (std::size_t d = 0; d < dimensionality; ++d)
-    ddc::detail::array(my_coords_dv)[d] =
-        static_cast<long int>(process_group::my_coord(static_cast<int>(d)));
-
-  return distribute_idx_range(global_domain, par_vector_dv, my_coords_dv);
-#endif
+          std::array<int, DiscreteDomainType::rank()> par_vector = {}) {
+  process_group::init_topology(comm, par_vector);
+  return process_group::localize(global_domain);
 }
 
 } // namespace paliwa

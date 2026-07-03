@@ -77,6 +77,25 @@ template <typename... DDims, typename InstancesType>
 void run_combination_technique(InstancesType const &instances,
                                paliwa::MPICommType comm) {
   constexpr size_t dimensionality = sizeof...(DDims);
+
+  // This helper builds and checks against the *full* (undistributed)
+  // global grid, so it is only valid when run on a single rank. If the
+  // binary is launched under mpirun with more than one process, skip
+  // rather than silently decomposing onto a 1-rank-worth par_vector
+  // against a larger communicator (which would trip the par_vector /
+  // comm_size consistency check inside paliwa::decompose in debug
+  // builds, and silently produce a broken topology in release builds).
+#ifdef PALIWA_WITH_MPI
+  {
+    int world_size = 1;
+    MPI_Comm_size(comm, &world_size);
+    if (world_size != 1) {
+      GTEST_SKIP() << "run_combination_technique is single-rank only; "
+                      "use the distributed_2d test for multi-rank coverage.";
+    }
+  }
+#endif
+
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   using DElem = SDDom::discrete_element_type;
   using DVect = SDDom::discrete_vector_type;
@@ -98,6 +117,16 @@ void run_combination_technique(InstancesType const &instances,
   ddc::DiscreteDomain<DDims...> dom_all =
       paliwa::optional_initialize_dims_periodic_unit_cube<DDims...>(
           resolution_all);
+
+  // Single-rank: par_vector is left at its default (all-zero), so
+  // process_group::init_topology's MPI_Dims_create call auto-fills it.
+  // Since the GTEST_SKIP above already guarantees comm_size == 1, the
+  // only value MPI_Dims_create can produce here is all-ones — i.e. the
+  // "decomposed" domain is the whole global domain. decompose() still
+  // needs to be called so that process_group's cached state (and the
+  // cart_comm it stores) is in a consistent, known state for anything
+  // downstream that reads it.
+  paliwa::decompose(dom_all, comm);
 
   std::array<long int, dimensionality> minimum_level;
   std::vector<std::array<long int, dimensionality>> all_levels;
@@ -414,6 +443,9 @@ void test_distributed_combination_technique_2d() {
   auto global_dom =
       paliwa::optional_initialize_dims_periodic_unit_cube(resolution);
 
+  // Explicit, fully-pinned par_vector: this test intentionally exercises
+  // a known 2x2 topology (matching color = world_rank < 4 above), not
+  // the auto-fill path.
   std::array<int, 2> par_vector = {2, 2};
   auto local_dom = paliwa::decompose(global_dom, sub_comm, par_vector);
   auto cart_comm = paliwa::process_group::get_cart_comm();
@@ -497,6 +529,7 @@ void test_distributed_combination_technique_2d() {
   EXPECT_NEAR(global_sum / static_cast<double>(full_max.size()),
               sinusoid_integral_analytical(2), 0.031);
 
+  paliwa::process_group::release();
   MPI_Comm_free(&sub_comm);
 }
 

@@ -164,6 +164,7 @@ void test_classify_ghost_by_rank() {
     EXPECT_EQ(classified.at(other)[2].uid<Dim>(), 62);
   }
 
+  paliwa::process_group::release();
   MPI_Comm_free(&sub_comm);
 }
 
@@ -314,6 +315,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   });
 
   // sub_comm was created by us; process_group owns the cart comm.
+  paliwa::process_group::release();
   MPI_Comm_free(&sub_comm);
 }
 
@@ -390,6 +392,7 @@ void test_distributed_roundtrip_1d_8ranks(std::string const &wavelet_name) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
   });
 
+  paliwa::process_group::release();
   MPI_Comm_free(&sub_comm);
 }
 
