@@ -369,6 +369,10 @@ bool distributed_transform_in(
   ddc::parallel_for_each(
       instance, local_restricted,
       KOKKOS_LAMBDA(ddc::DiscreteElement<DDims...> elem) {
+        if (!local_grid.domain().contains(elem))
+          return;
+        if (!extended_span.domain().contains(elem))
+          return;
         extended_span(elem) = local_grid(elem);
       });
 
@@ -400,6 +404,10 @@ bool distributed_transform_in(
   ddc::parallel_for_each(
       instance, local_restricted,
       KOKKOS_LAMBDA(ddc::DiscreteElement<DDims...> elem) {
+        if (!local_grid.domain().contains(elem))
+          return;
+        if (!extended_span.domain().contains(elem))
+          return;
         local_grid(elem) = extended_span(elem);
       });
 

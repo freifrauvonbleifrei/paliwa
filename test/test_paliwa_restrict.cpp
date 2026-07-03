@@ -86,10 +86,10 @@ void get_required_transform_domains_1d() {
                 required_transform_domain);
 
         ddc::Chunk all_strided_chunk(strided_dom_all,
-                                     ddc::HostAllocator<float>());
+                                     ddc::HostAllocator<double>());
         auto all_strided_span = all_strided_chunk.span_view();
         ddc::Chunk transform_chunk(required_transform_and_local_domain,
-                                   ddc::HostAllocator<float>());
+                                   ddc::HostAllocator<double>());
         auto transform_span = transform_chunk.span_view();
         // fill with NaNs
         ddc::host_for_each(
@@ -109,6 +109,16 @@ void get_required_transform_domains_1d() {
               transform_span(ixyz) = 2.0;
             });
         // do the transform and check non-nans
+
+        ddc::host_for_each(
+            restricted_strided_dom, KOKKOS_LAMBDA(DElem ixyz) {
+              ASSERT_TRUE(transform_span.domain().contains(ixyz));
+            });
+
+        ddc::host_for_each(
+            required_transform_domain, KOKKOS_LAMBDA(DElem ixyz) {
+              ASSERT_TRUE(transform_span.domain().contains(ixyz));
+            });
         if (is_for_hierarchization) {
           paliwa::hierarchize(all_strided_span, strided_dom_all, level,
                               minimum_level, maximum_level, wavelet_name,
@@ -122,7 +132,6 @@ void get_required_transform_domains_1d() {
             restricted_strided_dom, KOKKOS_LAMBDA(DElem ixyz) {
               ASSERT_FALSE(std::isnan(all_strided_span(ixyz)));
             });
-
         // do the transform again and check for same result
         if (is_for_hierarchization) {
           paliwa::hierarchize(transform_span, strided_dom_all, level,
