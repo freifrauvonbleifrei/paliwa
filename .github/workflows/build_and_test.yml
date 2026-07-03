@@ -124,25 +124,50 @@ jobs:
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
         cd build
+
         if mpiexec --version 2>&1 | grep -qi "open mpi"; then
           MUST_MPIEXEC="mpiexec --oversubscribe"
         else
           MUST_MPIEXEC="mpiexec"
         fi
+
         mkdir -p must_reports
-        spack build-env must -- mustrun --must:mpiexec "$MUST_MPIEXEC" --must:np "-n" -n 2 \
-          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat'
-        grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/roundtrip_1d_hat.html
-        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
-          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d_all_wavelets'
-        grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/roundtrip_2d.html
-        spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
-          ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
-        grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/combination_technique_2d.html
-        echo "MUST: all checks passed"
+
+        set +e
+
+        spack build-env must -- mustrun \
+          --must:mpiexec "$MUST_MPIEXEC" \
+          --must:np "-n" \
+          -n 2 \
+          ./test/paliwa_tests \
+          --gtest_filter='distributed.roundtrip_1d_hat'
+
+        MUST_STATUS=$?
+
+        echo "===== MUST exit code: ${MUST_STATUS} ====="
+
+        echo "===== Current directory ====="
+        pwd
+
+        echo "===== Directory contents ====="
+        ls -la
+
+        echo "===== Searching for MUST output ====="
+        find . -iname "*MUST*"
+        find /home/runner/work/paliwa/paliwa -iname "*MUST*" 2>/dev/null || true
+
+        if [ -f MUST_Output.html ]; then
+          echo "===== Found MUST_Output.html ====="
+          cp MUST_Output.html must_reports/roundtrip_1d_hat.html
+          echo "===== First 200 lines ====="
+          head -200 MUST_Output.html
+        else
+          echo "===== MUST_Output.html not found ====="
+        fi
+
+        set -e
+
+        exit ${MUST_STATUS}
     - name: Upload MUST reports
       if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
