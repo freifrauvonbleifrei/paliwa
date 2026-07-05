@@ -142,7 +142,7 @@ jobs:
         grep -q "no MPI usage errors" MUST_Output.html
         echo "MUST: all checks passed"
     - name: Upload MUST reports
-      if: failure() && matrix.mpi == 'yes' && matrix.build_type == 'Debug'
+      if: always() && (steps.must.outcome == 'failure')
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: must-failing-report
