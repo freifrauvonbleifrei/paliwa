@@ -283,7 +283,7 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   });
 
   MPI_Comm_free(&cart_comm);
-  //MPI_Comm_free(&sub_comm);
+  MPI_Comm_free(&sub_comm);
 }
 
 void roundtrip_1d_hat() { test_distributed_roundtrip_1d("hat"); }
