@@ -145,16 +145,12 @@ jobs:
         grep -q "no MPI usage errors" MUST_Output.html
         mv MUST_Output.html must_reports/combination_technique_2d.html
         echo "MUST: all checks passed"
-      continue-on-error: true
     - name: Upload MUST reports
-      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
+      if: failure() && matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
-        name: must-reports
-        path: build/must_reports/
-    - name: Check if MUST failed
-      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug' && steps.must.outcome == 'failure'
-      run: exit 1
+        name: must-failing-report
+        path: build/MUST_Output.html
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}
