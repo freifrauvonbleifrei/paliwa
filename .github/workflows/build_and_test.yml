@@ -122,7 +122,6 @@ jobs:
       if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       shell: spack-bash {0}
       run: |
-        set +e # continue even if a command returns non-zero exit code
         spack env activate ddc-env
         export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
         cd build
