@@ -281,9 +281,6 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
   });
-
-  MPI_Comm_free(&cart_comm);
-  MPI_Comm_free(&sub_comm);
 }
 
 void roundtrip_1d_hat() { test_distributed_roundtrip_1d("hat"); }
