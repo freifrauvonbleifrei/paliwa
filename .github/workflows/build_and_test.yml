@@ -118,6 +118,7 @@ jobs:
         $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         $MPI_RUN -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
     - name: Run MUST correctness checks (MPI only)
+      id: must
       if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       shell: spack-bash {0}
       run: |
@@ -133,22 +134,19 @@ jobs:
         spack build-env must -- mustrun --must:mpiexec "$MUST_MPIEXEC" --must:np "-n" -n 2 \
           ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat'
         grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/roundtrip_1d_hat.html
         spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
           ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d_all_wavelets'
         grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/roundtrip_2d.html
         spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
           ./test/paliwa_tests --gtest_filter='combination_technique.distributed_2d'
         grep -q "no MPI usage errors" MUST_Output.html
-        mv MUST_Output.html must_reports/combination_technique_2d.html
         echo "MUST: all checks passed"
     - name: Upload MUST reports
-      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
+      if: always() && (steps.must.outcome == 'failure')
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
-        name: must-reports
-        path: build/must_reports/
+        name: must-failing-report
+        path: build/MUST_Output.html
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}
