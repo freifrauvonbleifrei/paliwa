@@ -118,6 +118,7 @@ jobs:
         $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         $MPI_RUN -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
     - name: Run MUST correctness checks (MPI only)
+      id: must
       if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       shell: spack-bash {0}
       run: |
@@ -150,6 +151,9 @@ jobs:
       with:
         name: must-reports
         path: build/must_reports/
+    - name: Check if MUST failed
+      if: matrix.mpi == 'yes' && matrix.build_type == 'Debug' && steps.must.outcome == 'failure'
+      run: exit 1
     - name: Postprocess combination technique results
       if: matrix.mpi == 'yes' && matrix.build_type == 'Release'
       shell: spack-bash {0}
