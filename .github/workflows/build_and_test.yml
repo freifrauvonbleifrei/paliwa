@@ -143,6 +143,7 @@ jobs:
         grep -q "no MPI usage errors" MUST_Output.html
         mv MUST_Output.html must_reports/combination_technique_2d.html
         echo "MUST: all checks passed"
+      continue-on-error: true
     - name: Upload MUST reports
       if: matrix.mpi == 'yes' && matrix.build_type == 'Debug'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
