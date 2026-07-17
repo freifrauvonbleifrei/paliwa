@@ -91,6 +91,7 @@ target_sources(
             #BASE_DIRS include ${CMAKE_CURRENT_BINARY_DIR}/generated
             FILES
                 #${CMAKE_CURRENT_BINARY_DIR}/generated/ddc/config.hpp
+                paliwa/paliwa_adapter.hpp
                 paliwa/paliwa_dimensions.hpp
                 paliwa/paliwa_distribute.hpp
                 paliwa/paliwa_domains.hpp
