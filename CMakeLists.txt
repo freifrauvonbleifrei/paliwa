@@ -93,7 +93,6 @@ target_sources(
                 #${CMAKE_CURRENT_BINARY_DIR}/generated/ddc/config.hpp
                 paliwa/paliwa_dimensions.hpp
                 paliwa/paliwa_distribute.hpp
-                paliwa/paliwa_distributed_transform.hpp
                 paliwa/paliwa_domains.hpp
                 paliwa/paliwa_io.hpp
                 paliwa/paliwa_transform.hpp
