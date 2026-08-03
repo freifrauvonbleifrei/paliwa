@@ -38,11 +38,55 @@ transform_in(ChunkSpanType const strided_grid,
   auto chunk_domain = strided_grid.domain();
   using DElem = ddc::DiscreteElement<DDims...>;
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
+  constexpr size_t dimensionality = sizeof...(DDims);
 
   auto [even_domain_functor, odd_domain_functor] =
       get_even_and_odd_half_domain_functors<DDimInWhichToTransform, DDims...>();
 
+  // Pole domain (all dims except DDimInWhichToTransform, which is
+  // collapsed to extent 1) built from operating_domain rather than
+  // chunk_domain: chunk_domain may be a SparseDiscreteDomain (e.g. on
+  // the ghost-extended path), which has no .strides(). operating_domain
+  // is always a StridedDiscreteDomain, and its non-transform-dim
+  // structure is invariant across the level loop below (only the
+  // DDimInWhichToTransform component of current_level changes), so it's
+  // safe and correct to derive the pole structure once, up front, from
+  // the initial `level`.
+  auto const initial_operating_domain = strided_domain_from_level<DDims...>(
+      ddc::detail::array(level), ddc::detail::array(maximum_level));
+
+  ddc::DiscreteVector<DDims...> pole_extents =
+      initial_operating_domain.extents();
+  pole_extents.template get<DDimInWhichToTransform>() = 1;
+  SDDom const pole_domain(initial_operating_domain.front(), pole_extents,
+                           initial_operating_domain.strides());
+
+  std::array<long int, dimensionality> const pole_extents_arr =
+      ddc::detail::array(pole_extents);
+  std::array<long int, dimensionality> const pole_strides_arr =
+      ddc::detail::array(initial_operating_domain.strides());
+  DElem const pole_front = pole_domain.front();
+  long int const n_poles = static_cast<long int>(pole_domain.size());
+
+  // Decompose a flat league index into the full-rank pole element
+  // (mixed-radix over the non-transform extents, honoring each dim's
+  // stride). The transform-dim component carried along here is a
+  // placeholder (extent 1 => always 0 offset), overwritten per line
+  // element below via replace_dim.
+  auto pole_elem_from_index = KOKKOS_LAMBDA(long int idx)->DElem {
+    std::array<long int, dimensionality> multi{};
+    for (size_t d = 0; d < dimensionality; ++d) {
+      multi[d] = (idx % pole_extents_arr[d]) * pole_strides_arr[d];
+      idx /= pole_extents_arr[d];
+    }
+    ddc::DiscreteVector<DDims...> const offset(multi);
+    return pole_front + offset;
+  };
+
   ddc::DiscreteVector<DDims...> current_level(level);
+
+  using TeamPolicy = Kokkos::TeamPolicy<ExecSpace>;
+  using TeamMember = typename TeamPolicy::member_type;
 
   for (long int current_1d_level : one_d_level_range) {
     assert(current_1d_level > 0);
@@ -68,41 +112,71 @@ transform_in(ChunkSpanType const strided_grid,
         throw std::runtime_error("Filter offset not supported");
 
       auto const write_to_domain = coarsen_domain(operating_domain);
+      auto const line_front =
+          ddc::select<DDimInWhichToTransform>(write_to_domain.front());
+      long int const line_extent = static_cast<long int>(
+          write_to_domain.extents().template get<DDimInWhichToTransform>());
+      auto const line_stride =
+          write_to_domain.strides().template get<DDimInWhichToTransform>();
+      auto const write_back_1d =
+          ddc::select<DDimInWhichToTransform>(write_to_domain.back());
+      auto const operating_front_1d =
+          ddc::select<DDimInWhichToTransform>(operating_domain.front());
 
-      ddc::parallel_for_each(
-          instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
-            // TODO: remove these checks for efficiency. Can't be deleted.
-            if (!chunk_domain.contains(ixyz)) {
-              return;
-            }
+      TeamPolicy const policy(instance, static_cast<int>(n_poles),
+                              Kokkos::AUTO);
 
-            DElem lower_element = ixyz - this_d_stride;
-            DElem upper_element = ixyz + this_d_stride;
+      Kokkos::parallel_for(
+          policy, KOKKOS_LAMBDA(TeamMember const &team) {
+            long int const pole_idx = team.league_rank();
+            DElem const pole_elem = pole_elem_from_index(pole_idx);
 
-            if ((offset == 1) &&
-                (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
-                     this_d_stride >
-                 ddc::DiscreteElement<DDimInWhichToTransform>(
-                     write_to_domain.back()))) {
-              upper_element -= virtual_length;
-            } else if ((offset == 0) &&
-                       (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) <=
-                        ddc::select<DDimInWhichToTransform>(
-                            operating_domain.front()))) {
-              lower_element += virtual_length;
-            }
+            Kokkos::parallel_for(
+                Kokkos::TeamThreadRange(team, line_extent),
+                [&](long int line_idx) {
+                  ddc::DiscreteElement<DDimInWhichToTransform> const
+                      line_elem =
+                          line_front +
+                          ddc::DiscreteVector<DDimInWhichToTransform>(
+                              line_idx * line_stride);
+                  DElem const ixyz =
+                      replace_dim<DDimInWhichToTransform>(pole_elem,
+                                                          line_elem);
 
-            if (!chunk_domain.contains(lower_element) ||
-                !chunk_domain.contains(upper_element))
-              return;
+                  // TODO: remove these checks for efficiency. Can't be
+                  // deleted.
+                  if (!chunk_domain.contains(ixyz)) {
+                    return;
+                  }
 
-            using value_type = std::decay_t<decltype(strided_grid(ixyz))>;
-            strided_grid(ixyz) =
-                static_cast<value_type>(filter[0]) *
-                    strided_grid(lower_element) +
-                static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
-                static_cast<value_type>(filter[2]) *
-                    strided_grid(upper_element);
+                  DElem lower_element = ixyz - this_d_stride;
+                  DElem upper_element = ixyz + this_d_stride;
+
+                  if ((offset == 1) &&
+                      (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
+                           this_d_stride >
+                       ddc::DiscreteElement<DDimInWhichToTransform>(
+                           write_back_1d))) {
+                    upper_element -= virtual_length;
+                  } else if ((offset == 0) &&
+                             (ddc::DiscreteElement<DDimInWhichToTransform>(
+                                  ixyz) <= operating_front_1d)) {
+                    lower_element += virtual_length;
+                  }
+
+                  if (!chunk_domain.contains(lower_element) ||
+                      !chunk_domain.contains(upper_element))
+                    return;
+
+                  using value_type =
+                      std::decay_t<decltype(strided_grid(ixyz))>;
+                  strided_grid(ixyz) =
+                      static_cast<value_type>(filter[0]) *
+                          strided_grid(lower_element) +
+                      static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
+                      static_cast<value_type>(filter[2]) *
+                          strided_grid(upper_element);
+                });
           });
     }
   }
