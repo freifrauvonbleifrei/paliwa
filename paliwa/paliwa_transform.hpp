@@ -12,6 +12,7 @@
 
 #include "paliwa_domains.hpp"
 #include "paliwa_wavelets.hpp"
+#include "paliwa_adapter.hpp"
 
 namespace paliwa {
 
@@ -156,35 +157,41 @@ dehierarchize_in(ChunkSpanType const strided_grid,
 }
 
 template <typename ChunkSpanType,
-          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename ExecSpace = Kokkos::DefaultExecutionSpace,
           typename... DDims>
-constexpr void hierarchize(ChunkSpanType const strided_grid,
+constexpr void hierarchize(ChunkSpanType strided_grid,
                            ddc::DiscreteVector<DDims...> const &level,
                            ddc::DiscreteVector<DDims...> const &minimum_level,
                            ddc::DiscreteVector<DDims...> const &maximum_level,
                            std::string const &wavelet_name = "hat",
                            ExecSpace instance = ExecSpace()) {
-  // fold expression to call for every dimension
+  auto adapted = adapter_in<ExecSpace>(strided_grid);
+
   [[maybe_unused]] bool unused =
-      (hierarchize_in<DDims>(strided_grid, level, minimum_level, maximum_level,
+      (hierarchize_in<DDims>(adapted.view(), level, minimum_level, maximum_level,
                              wavelet_name, instance) &&
        ...);
+
+  adapter_out(strided_grid, adapted, instance);
 }
 
 template <typename ChunkSpanType,
-          typename ExecSpace, // = Kokkos::DefaultExecutionSpace
+          typename ExecSpace = Kokkos::DefaultExecutionSpace,
           typename... DDims>
-constexpr void dehierarchize(ChunkSpanType const strided_grid,
+constexpr void dehierarchize(ChunkSpanType strided_grid,
                              ddc::DiscreteVector<DDims...> const &level,
                              ddc::DiscreteVector<DDims...> const &minimum_level,
                              ddc::DiscreteVector<DDims...> const &maximum_level,
                              std::string const &wavelet_name = "hat",
                              ExecSpace instance = ExecSpace()) {
-  // fold expression to call for every dimension
+  auto adapted = adapter_in<ExecSpace>(strided_grid);
+
   [[maybe_unused]] bool unused =
-      (dehierarchize_in<DDims>(strided_grid, level, minimum_level,
+      (dehierarchize_in<DDims>(adapted.view(), level, minimum_level,
                                maximum_level, wavelet_name, instance) &&
        ...);
+
+  adapter_out(strided_grid, adapted, instance);
 }
 
 template <typename DDim, typename ChunkSpanType, typename LevelRange,
@@ -348,3 +355,4 @@ constexpr ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
           minimum_level, maximum_level, wavelet_name));
 }
 } // namespace paliwa
+
