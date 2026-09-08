@@ -73,304 +73,343 @@ initialize_combination_scheme(
   return level_data;
 }
 
-template <typename... DDims, typename InstancesType>
-void run_combination_technique(InstancesType const &instances,
-                               paliwa::MPICommType comm) {
-  constexpr size_t dimensionality = sizeof...(DDims);
+namespace detail {
 
-  // This helper builds and checks against the *full* (undistributed)
-  // global grid, so it is only valid when run on a single rank. If the
-  // binary is launched under mpirun with more than one process, skip
-  // rather than silently decomposing onto a 1-rank-worth par_vector
-  // against a larger communicator (which would trip the par_vector /
-  // comm_size consistency check inside paliwa::decompose in debug
-  // builds, and silently produce a broken topology in release builds).
+// NOTE: this used to be a single function template
+//   template <typename... DDims, typename InstancesType>
+//   void run_combination_technique(InstancesType const &instances, ...);
+// with DDims... explicitly specified at call sites (e.g.
+// run_combination_technique<DDimF, DDimG, DDimH, DDimI>(instances, comm))
+// and InstancesType deduced purely from the function argument.
+//
+// Under nvcc, this shape (a non-trailing, explicitly-specified pack
+// followed by a parameter deduced only from an argument) caused the
+// device-side stub generation to conflate InstancesType into the DDims
+// pack itself, producing duplicate-type DiscreteElement/DiscreteVector/
+// DiscreteDomain instantiations (see "dimensions must be unique"
+// static_assert failures) once KOKKOS_LAMBDAs inside the function body
+// were compiled for the GPU. Splitting the explicit pack onto a class
+// template, with only the truly-deduced parameter left on a function
+// template (the call operator below), avoids the ambiguity entirely.
+template <typename... DDims>
+struct run_combination_technique_impl {
+  template <typename InstancesType>
+  void operator()(InstancesType const &instances,
+                   paliwa::MPICommType comm) const {
+    constexpr size_t dimensionality = sizeof...(DDims);
+
+    // This helper builds and checks against the *full* (undistributed)
+    // global grid, so it is only valid when run on a single rank. If the
+    // binary is launched under mpirun with more than one process, skip
+    // rather than silently decomposing onto a 1-rank-worth par_vector
+    // against a larger communicator (which would trip the par_vector /
+    // comm_size consistency check inside paliwa::decompose in debug
+    // builds, and silently produce a broken topology in release builds).
 #ifdef PALIWA_WITH_MPI
-  {
-    int world_size = 1;
-    MPI_Comm_size(comm, &world_size);
-    if (world_size != 1) {
-      GTEST_SKIP() << "run_combination_technique is single-rank only; "
-                      "use the distributed_2d test for multi-rank coverage.";
+    {
+      int world_size = 1;
+      MPI_Comm_size(comm, &world_size);
+      if (world_size != 1) {
+        GTEST_SKIP() << "run_combination_technique is single-rank only; "
+                        "use the distributed_2d test for multi-rank coverage.";
+      }
     }
-  }
 #endif
 
-  using SDDom = ddc::StridedDiscreteDomain<DDims...>;
-  using DElem = SDDom::discrete_element_type;
-  using DVect = SDDom::discrete_vector_type;
-  std::array<long int, dimensionality> maximum_level;
-  if constexpr (dimensionality == 2) {
-    maximum_level = {10, 11};
-  } else if constexpr (dimensionality == 3) {
-    maximum_level = {5, 6, 7};
-  } else if constexpr (dimensionality == 4) {
-    maximum_level = {3, 4, 5, 6};
-  } else {
-    throw std::runtime_error("Dimensionality not supported");
-  }
-  std::array<long int, dimensionality> resolution;
-  std::transform(maximum_level.begin(), maximum_level.end(), resolution.begin(),
-                 [](int ml) { return (1 << ml); });
-  DVect resolution_all(resolution);
-
-  ddc::DiscreteDomain<DDims...> dom_all =
-      paliwa::optional_initialize_dims_periodic_unit_cube<DDims...>(
-          resolution_all);
-
-  // Single-rank: par_vector is left at its default (all-zero), so
-  // process_group::init_topology's MPI_Dims_create call auto-fills it.
-  // Since the GTEST_SKIP above already guarantees comm_size == 1, the
-  // only value MPI_Dims_create can produce here is all-ones — i.e. the
-  // "decomposed" domain is the whole global domain. decompose() still
-  // needs to be called so that process_group's cached state (and the
-  // cart_comm it stores) is in a consistent, known state for anything
-  // downstream that reads it.
-  paliwa::decompose(dom_all, comm);
-
-  std::array<long int, dimensionality> minimum_level;
-  std::vector<std::array<long int, dimensionality>> all_levels;
-  std::vector<double> all_combi_coefficients;
-  if constexpr (dimensionality == 2) {
-    minimum_level = {2, 3};
-    all_levels = {{2, 11}, {3, 10}, {4, 9},  {5, 8},  {6, 7}, {7, 6},
-                  {8, 5},  {9, 4},  {10, 3}, {2, 10}, {3, 9}, {4, 8},
-                  {5, 7},  {6, 6},  {7, 5},  {8, 4},  {9, 3}};
-    all_combi_coefficients = {1,  1,  1,  1,  1,  1,  1,  1, 1,
-                              -1, -1, -1, -1, -1, -1, -1, -1};
-  } else if constexpr (dimensionality == 3) {
-    minimum_level = {4, 5, 6};
-    all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
-    all_combi_coefficients = {1, 1, 1, -2};
-  } else if constexpr (dimensionality == 4) {
-    minimum_level = {1, 2, 3, 4};
-    all_levels = {{2, 2, 4, 4}, {3, 2, 3, 4}, {1, 4, 3, 4}, {1, 2, 5, 4},
-                  {2, 3, 3, 4}, {1, 3, 4, 4}, {2, 2, 3, 5}, {1, 3, 3, 5},
-                  {1, 2, 3, 6}, {1, 2, 4, 5}, {1, 2, 4, 4}, {2, 2, 3, 4},
-                  {1, 3, 3, 4}, {1, 2, 3, 5}, {1, 2, 3, 4}};
-    all_combi_coefficients = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -3, -3, -3, -3, 3};
-  } else {
-    static_assert(dimensionality < 5, "Dimensionality not yet supported");
-  }
-  DVect const ddc_minimum_level(minimum_level);
-  DVect const ddc_maximum_level(maximum_level);
-  assert(all_levels.size() == all_combi_coefficients.size());
-  auto component_grid_domains =
-      paliwa::get_strided_domains<DDims...>(all_levels, maximum_level);
-  // TODO: make this full-grid compatible class?
-  std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
-      level_data = initialize_combination_scheme(component_grid_domains,
-                                                 all_levels, instances);
-  size_t accumulated_full_grid_size = 0;
-  for (const auto &domain : component_grid_domains) {
-    accumulated_full_grid_size += domain.size();
-  }
-  if constexpr (dimensionality == 2) {
-    EXPECT_EQ(accumulated_full_grid_size, 106496);
-  } else if constexpr (dimensionality == 3) {
-    EXPECT_EQ(accumulated_full_grid_size, 425984);
-  } else if constexpr (dimensionality == 4) {
-    EXPECT_EQ(accumulated_full_grid_size, 50176);
-  }
-  paliwa::fence_all_instances(instances);
-
-  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
-    auto &level = all_levels[grid_index];
-    auto strided_grid = level_data[grid_index].span_view();
-
-    // TODO: how easiest for visualizable output? pdi? raw ofstream?
-    // (-> raw ofstream for now)
-    std::string level_str = "";
-    for (auto l : level) {
-      level_str += std::to_string(l) + "_";
+    using SDDom = ddc::StridedDiscreteDomain<DDims...>;
+    using DElem = SDDom::discrete_element_type;
+    using DVect = SDDom::discrete_vector_type;
+    std::array<long int, dimensionality> maximum_level;
+    if constexpr (dimensionality == 2) {
+      maximum_level = {10, 11};
+    } else if constexpr (dimensionality == 3) {
+      maximum_level = {5, 6, 7};
+    } else if constexpr (dimensionality == 4) {
+      maximum_level = {3, 4, 5, 6};
+    } else {
+      throw std::runtime_error("Dimensionality not supported");
     }
-    level_str += std::to_string(dimensionality) + "d";
-    std::string const filename = "strided_grid_" + level_str + ".raw";
-    paliwa::dump_chunk_span_to_binary_file(strided_grid, filename);
-    // std::cout << strided_grid << std::endl;
-  }
+    std::array<long int, dimensionality> resolution;
+    std::transform(maximum_level.begin(), maximum_level.end(),
+                   resolution.begin(),
+                   [](int ml) { return (1 << ml); });
+    DVect resolution_all(resolution);
 
-  std::string const wavelet_name = "biorthogonal";
-  // Hierarchize / wavelet-ify / filter in each direction.
-  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
-    DVect level(all_levels[grid_index]);
-    auto strided_grid = level_data[grid_index].span_view();
+    ddc::DiscreteDomain<DDims...> dom_all =
+        paliwa::optional_initialize_dims_periodic_unit_cube<DDims...>(
+            resolution_all);
 
-    paliwa::hierarchize(strided_grid, component_grid_domains[grid_index], level,
-                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
-                        instances[grid_index % instances.size()]);
-  }
-  paliwa::fence_all_instances(instances);
+    // Single-rank: par_vector is left at its default (all-zero), so
+    // process_group::init_topology's MPI_Dims_create call auto-fills it.
+    // Since the GTEST_SKIP above already guarantees comm_size == 1, the
+    // only value MPI_Dims_create can produce here is all-ones — i.e. the
+    // "decomposed" domain is the whole global domain. decompose() still
+    // needs to be called so that process_group's cached state (and the
+    // cart_comm it stores) is in a consistent, known state for anything
+    // downstream that reads it.
+    paliwa::decompose(dom_all, comm);
 
-  // Sparse grid!
-  std::map<std::array<long int, dimensionality>, int> subspace_count;
-  // For each component grid, count up the contained subspaces.
-  std::function<void(const std::array<long int, dimensionality> &)>
-      insert_function =
-          [&](const std::array<long int, dimensionality> &subspace_level) {
-            if (subspace_count.find(subspace_level) == subspace_count.end()) {
-              subspace_count[subspace_level] = 1;
-            } else {
-              ++subspace_count[subspace_level];
-            }
-          };
-  for (const auto &level : all_levels) {
-    std::array<long int, dimensionality> tmp_level;
-    paliwa::iterate_hierarchical_subspaces(level, tmp_level, 0,
-                                           insert_function);
-  }
-
-  // TODO: make this a sparse-grid compatible class?
-  Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
-                       Kokkos::DefaultExecutionSpace>
-      subspaces_levels(subspace_count.size());
-  Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
-                       Kokkos::DefaultExecutionSpace>
-      subspaces_domains_and_data_pointers(subspace_count.size());
-  // Leads to weird hangup (different type w/ hash function?)!!
-  // auto subspaces_levels_host = Kokkos::create_mirror(subspaces_levels);
-  Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
-                       Kokkos::SharedHostPinnedSpace>
-      subspaces_levels_host(subspace_count.size());
-  Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
-                       Kokkos::SharedHostPinnedSpace>
-      subspaces_domains_and_data_pointers_host(subspace_count.size());
-
-  size_t accumulated_sparse_grid_size = 0;
-  size_t used_subspace_number = 0;
-  for (const auto &subspace_level_and_count : subspace_count) {
-    auto const &subspace_level = subspace_level_and_count.first;
-    auto const &count = subspace_level_and_count.second;
-    if (count > 1) {
-      auto subspace_domain =
-          paliwa::strided_hierarchical_domain_from_level<DDims...>(
-              subspace_level, maximum_level);
-      accumulated_sparse_grid_size += subspace_domain.size();
-      subspaces_levels_host.insert(used_subspace_number, subspace_level);
-      subspaces_domains_and_data_pointers_host.insert(
-          used_subspace_number++,
-          std::make_pair(std::move(subspace_domain), nullptr));
+    std::array<long int, dimensionality> minimum_level;
+    std::vector<std::array<long int, dimensionality>> all_levels;
+    std::vector<double> all_combi_coefficients;
+    if constexpr (dimensionality == 2) {
+      minimum_level = {2, 3};
+      all_levels = {{2, 11}, {3, 10}, {4, 9},  {5, 8},  {6, 7}, {7, 6},
+                    {8, 5},  {9, 4},  {10, 3}, {2, 10}, {3, 9}, {4, 8},
+                    {5, 7},  {6, 6},  {7, 5},  {8, 4},  {9, 3}};
+      all_combi_coefficients = {1,  1,  1,  1,  1,  1,  1,  1, 1,
+                                -1, -1, -1, -1, -1, -1, -1, -1};
+    } else if constexpr (dimensionality == 3) {
+      minimum_level = {4, 5, 6};
+      all_levels = {{4, 6, 7}, {5, 5, 7}, {5, 6, 6}, {4, 5, 6}};
+      all_combi_coefficients = {1, 1, 1, -2};
+    } else if constexpr (dimensionality == 4) {
+      minimum_level = {1, 2, 3, 4};
+      all_levels = {{2, 2, 4, 4}, {3, 2, 3, 4}, {1, 4, 3, 4}, {1, 2, 5, 4},
+                    {2, 3, 3, 4}, {1, 3, 4, 4}, {2, 2, 3, 5}, {1, 3, 3, 5},
+                    {1, 2, 3, 6}, {1, 2, 4, 5}, {1, 2, 4, 4}, {2, 2, 3, 4},
+                    {1, 3, 3, 4}, {1, 2, 3, 5}, {1, 2, 3, 4}};
+      all_combi_coefficients = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -3, -3, -3, -3, 3};
+    } else {
+      static_assert(dimensionality < 5, "Dimensionality not yet supported");
     }
-  }
-  if constexpr (dimensionality == 2) {
-    EXPECT_EQ(accumulated_sparse_grid_size, 18432);
-  } else if constexpr (dimensionality == 3) {
-    EXPECT_EQ(accumulated_sparse_grid_size, 131072);
-  } else if constexpr (dimensionality == 4) {
-    EXPECT_EQ(accumulated_sparse_grid_size, 5120);
-  }
-
-  // Allocate once.
-  Kokkos::View<double *> all_subspace_data("all_subspace_data",
-                                           accumulated_sparse_grid_size);
-
-  size_t current_data_pointer_index = 0;
-  for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
-       ++i) {
-    if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
-      auto &subspace_domain =
-          subspaces_domains_and_data_pointers_host.value_at(i).first;
-      auto &data_pointer =
-          subspaces_domains_and_data_pointers_host.value_at(i).second;
-      // Basically exclusive scan.
-      data_pointer = all_subspace_data.data() + current_data_pointer_index;
-      current_data_pointer_index += subspace_domain.size();
+    DVect const ddc_minimum_level(minimum_level);
+    DVect const ddc_maximum_level(maximum_level);
+    assert(all_levels.size() == all_combi_coefficients.size());
+    auto component_grid_domains =
+        paliwa::get_strided_domains<DDims...>(all_levels, maximum_level);
+    // TODO: make this full-grid compatible class?
+    std::vector<ddc::Chunk<double, SDDom, ddc::DeviceAllocator<double>>>
+        level_data = initialize_combination_scheme(component_grid_domains,
+                                                   all_levels, instances);
+    size_t accumulated_full_grid_size = 0;
+    for (const auto &domain : component_grid_domains) {
+      accumulated_full_grid_size += domain.size();
     }
-  }
-  Kokkos::deep_copy(subspaces_levels, subspaces_levels_host);
-  Kokkos::deep_copy(subspaces_domains_and_data_pointers,
-                    subspaces_domains_and_data_pointers_host);
+    if constexpr (dimensionality == 2) {
+      EXPECT_EQ(accumulated_full_grid_size, 106496);
+    } else if constexpr (dimensionality == 3) {
+      EXPECT_EQ(accumulated_full_grid_size, 425984);
+    } else if constexpr (dimensionality == 4) {
+      EXPECT_EQ(accumulated_full_grid_size, 50176);
+    }
+    paliwa::fence_all_instances(instances);
 
-  // Collect component grids onto the sparse grid.
-  for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
-    // TODO: this for is another potential parallel_for_each!
-    auto &level = all_levels[grid_index];
-    double coefficient = all_combi_coefficients[grid_index];
-    auto strided_grid = level_data[grid_index].span_view();
+    for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+      auto &level = all_levels[grid_index];
+      auto strided_grid = level_data[grid_index].span_view();
 
+      // TODO: how easiest for visualizable output? pdi? raw ofstream?
+      // (-> raw ofstream for now)
+      std::string level_str = "";
+      for (auto l : level) {
+        level_str += std::to_string(l) + "_";
+      }
+      level_str += std::to_string(dimensionality) + "d";
+      std::string const filename = "strided_grid_" + level_str + ".raw";
+      paliwa::dump_chunk_span_to_binary_file(strided_grid, filename);
+      // std::cout << strided_grid << std::endl;
+    }
+
+    std::string const wavelet_name = "biorthogonal";
+    // Hierarchize / wavelet-ify / filter in each direction.
+    for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+      DVect level(all_levels[grid_index]);
+      auto strided_grid = level_data[grid_index].span_view();
+
+      paliwa::hierarchize(strided_grid, component_grid_domains[grid_index],
+                          level, ddc_minimum_level, ddc_maximum_level,
+                          wavelet_name,
+                          instances[grid_index % instances.size()]);
+    }
+    paliwa::fence_all_instances(instances);
+
+    // Sparse grid!
+    std::map<std::array<long int, dimensionality>, int> subspace_count;
+    // For each component grid, count up the contained subspaces.
+    std::function<void(const std::array<long int, dimensionality> &)>
+        insert_function =
+            [&](const std::array<long int, dimensionality> &subspace_level) {
+              if (subspace_count.find(subspace_level) == subspace_count.end()) {
+                subspace_count[subspace_level] = 1;
+              } else {
+                ++subspace_count[subspace_level];
+              }
+            };
+    for (const auto &level : all_levels) {
+      std::array<long int, dimensionality> tmp_level;
+      paliwa::iterate_hierarchical_subspaces(level, tmp_level, 0,
+                                             insert_function);
+    }
+
+    // TODO: make this a sparse-grid compatible class?
+    Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
+                         Kokkos::DefaultExecutionSpace>
+        subspaces_levels(subspace_count.size());
+    Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
+                         Kokkos::DefaultExecutionSpace>
+        subspaces_domains_and_data_pointers(subspace_count.size());
+    // Leads to weird hangup (different type w/ hash function?)!!
+    // auto subspaces_levels_host = Kokkos::create_mirror(subspaces_levels);
+    Kokkos::UnorderedMap<size_t, std::array<long int, dimensionality>,
+                         Kokkos::SharedHostPinnedSpace>
+        subspaces_levels_host(subspace_count.size());
+    Kokkos::UnorderedMap<size_t, std::pair<SDDom, double *>,
+                         Kokkos::SharedHostPinnedSpace>
+        subspaces_domains_and_data_pointers_host(subspace_count.size());
+
+    size_t accumulated_sparse_grid_size = 0;
+    size_t used_subspace_number = 0;
+    for (const auto &subspace_level_and_count : subspace_count) {
+      auto const &subspace_level = subspace_level_and_count.first;
+      auto const &count = subspace_level_and_count.second;
+      if (count > 1) {
+        auto subspace_domain =
+            paliwa::strided_hierarchical_domain_from_level<DDims...>(
+                subspace_level, maximum_level);
+        accumulated_sparse_grid_size += subspace_domain.size();
+        subspaces_levels_host.insert(used_subspace_number, subspace_level);
+        subspaces_domains_and_data_pointers_host.insert(
+            used_subspace_number++,
+            std::make_pair(std::move(subspace_domain), nullptr));
+      }
+    }
+    if constexpr (dimensionality == 2) {
+      EXPECT_EQ(accumulated_sparse_grid_size, 18432);
+    } else if constexpr (dimensionality == 3) {
+      EXPECT_EQ(accumulated_sparse_grid_size, 131072);
+    } else if constexpr (dimensionality == 4) {
+      EXPECT_EQ(accumulated_sparse_grid_size, 5120);
+    }
+
+    // Allocate once.
+    Kokkos::View<double *> all_subspace_data("all_subspace_data",
+                                             accumulated_sparse_grid_size);
+
+    size_t current_data_pointer_index = 0;
     for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
          ++i) {
       if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
-        auto const &subspace_level = subspaces_levels_host.value_at(i);
+        auto &subspace_domain =
+            subspaces_domains_and_data_pointers_host.value_at(i).first;
+        auto &data_pointer =
+            subspaces_domains_and_data_pointers_host.value_at(i).second;
+        // Basically exclusive scan.
+        data_pointer = all_subspace_data.data() + current_data_pointer_index;
+        current_data_pointer_index += subspace_domain.size();
+      }
+    }
+    Kokkos::deep_copy(subspaces_levels, subspaces_levels_host);
+    Kokkos::deep_copy(subspaces_domains_and_data_pointers,
+                      subspaces_domains_and_data_pointers_host);
+
+    // Collect component grids onto the sparse grid.
+    for (size_t grid_index = 0; grid_index < all_levels.size(); ++grid_index) {
+      // TODO: this for is another potential parallel_for_each!
+      auto &level = all_levels[grid_index];
+      double coefficient = all_combi_coefficients[grid_index];
+      auto strided_grid = level_data[grid_index].span_view();
+
+      for (size_t i = 0;
+           i < subspaces_domains_and_data_pointers_host.capacity(); ++i) {
+        if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
+          auto const &subspace_level = subspaces_levels_host.value_at(i);
+          auto const &subspace_domain =
+              subspaces_domains_and_data_pointers_host.value_at(i).first;
+          auto const &data_pointer =
+              subspaces_domains_and_data_pointers_host.value_at(i).second;
+          bool contains = true; // TODO: use ddc contains domain operator
+          for (size_t d = 0; d < dimensionality; ++d) {
+            if (subspace_level[d] > level[d]) {
+              contains = false;
+              break;
+            }
+          }
+          if (contains == false)
+            continue;
+          // Copy data into the allocated space.
+          ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
+                                                            subspace_domain);
+          auto subspace_view = subspace_chunk_span.span_view();
+          ddc::parallel_for_each(
+              instances[i % instances.size()], subspace_domain,
+              KOKKOS_LAMBDA(DElem const ixyz) {
+                subspace_view(ixyz) += coefficient * strided_grid(ixyz);
+              });
+        }
+      }
+    }
+    paliwa::fence_all_instances(instances);
+
+    // Interpolate all onto full grid.
+    // Allocate and initialize to 0.
+    ddc::Chunk full_grid("interpolated_on_full_grid", dom_all,
+                         ddc::DeviceAllocator<double>());
+    auto full_grid_view = full_grid.span_view();
+    ddc::parallel_fill(full_grid_view, 0);
+
+    SDDom const full_max = paliwa::strided_domain_from_level<DDims...>(
+        ddc::detail::array(ddc_maximum_level),
+        ddc::detail::array(ddc_maximum_level));
+
+    // Now copy into full grid.
+    for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
+         ++i) {
+      if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
         auto const &subspace_domain =
             subspaces_domains_and_data_pointers_host.value_at(i).first;
         auto const &data_pointer =
             subspaces_domains_and_data_pointers_host.value_at(i).second;
-        bool contains = true; // TODO: use ddc contains domain operator
-        for (size_t d = 0; d < dimensionality; ++d) {
-          if (subspace_level[d] > level[d]) {
-            contains = false;
-            break;
-          }
-        }
-        if (contains == false)
-          continue;
-        // Copy data into the allocated space.
         ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
                                                           subspace_domain);
         auto subspace_view = subspace_chunk_span.span_view();
         ddc::parallel_for_each(
             instances[i % instances.size()], subspace_domain,
             KOKKOS_LAMBDA(DElem const ixyz) {
-              subspace_view(ixyz) += coefficient * strided_grid(ixyz);
+              full_grid_view(ixyz) += subspace_view(ixyz);
             });
       }
     }
-  }
-  paliwa::fence_all_instances(instances);
+    paliwa::fence_all_instances(instances);
 
-  // Interpolate all onto full grid.
-  // Allocate and initialize to 0.
-  ddc::Chunk full_grid("interpolated_on_full_grid", dom_all,
-                       ddc::DeviceAllocator<double>());
-  auto full_grid_view = full_grid.span_view();
-  ddc::parallel_fill(full_grid_view, 0);
+    // De-hierarchize on the combined full grid.
+    paliwa::dehierarchize(full_grid_view, full_max, ddc_maximum_level,
+                          ddc_minimum_level, ddc_maximum_level, wavelet_name,
+                          instances[0]);
+    paliwa::fence_all_instances(instances);
 
-  SDDom const full_max = paliwa::strided_domain_from_level<DDims...>(
-      ddc::detail::array(ddc_maximum_level),
-      ddc::detail::array(ddc_maximum_level));
-
-  // Now copy into full grid.
-  for (size_t i = 0; i < subspaces_domains_and_data_pointers_host.capacity();
-       ++i) {
-    if (subspaces_domains_and_data_pointers_host.valid_at(i)) {
-      auto const &subspace_domain =
-          subspaces_domains_and_data_pointers_host.value_at(i).first;
-      auto const &data_pointer =
-          subspaces_domains_and_data_pointers_host.value_at(i).second;
-      ddc::ChunkSpan<double, SDDom> subspace_chunk_span(data_pointer,
-                                                        subspace_domain);
-      auto subspace_view = subspace_chunk_span.span_view();
-      ddc::parallel_for_each(
-          instances[i % instances.size()], subspace_domain,
-          KOKKOS_LAMBDA(DElem const ixyz) {
-            full_grid_view(ixyz) += subspace_view(ixyz);
-          });
+    std::string max_level_str = "";
+    for (auto l : maximum_level) {
+      max_level_str += std::to_string(l) + "_";
     }
+    max_level_str += std::to_string(dimensionality) + "d";
+    std::string const filename = "full_grid_" + max_level_str + ".raw";
+    paliwa::dump_chunk_span_to_binary_file(full_grid_view, filename);
+    std::cout << "Wrote full grid to " << filename << std::endl;
+    double const reduced_value = ddc::parallel_transform_reduce(
+        dom_all, static_cast<double>(0.), ddc::reducer::sum<double>(),
+        full_grid_view);
+    double const mean_value = reduced_value / dom_all.size();
+    std::cout << "Mean value on finest grid: " << mean_value << " (from "
+              << reduced_value << " total)" << std::endl;
+    EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality),
+               0.031);
   }
-  paliwa::fence_all_instances(instances);
+};
 
-  // De-hierarchize on the combined full grid.
-  paliwa::dehierarchize(full_grid_view, full_max, ddc_maximum_level,
-                        ddc_minimum_level, ddc_maximum_level, wavelet_name,
-                        instances[0]);
-  paliwa::fence_all_instances(instances);
+} // namespace detail
 
-  std::string max_level_str = "";
-  for (auto l : maximum_level) {
-    max_level_str += std::to_string(l) + "_";
-  }
-  max_level_str += std::to_string(dimensionality) + "d";
-  std::string const filename = "full_grid_" + max_level_str + ".raw";
-  paliwa::dump_chunk_span_to_binary_file(full_grid_view, filename);
-  std::cout << "Wrote full grid to " << filename << std::endl;
-  double const reduced_value = ddc::parallel_transform_reduce(
-      dom_all, static_cast<double>(0.), ddc::reducer::sum<double>(),
-      full_grid_view);
-  double const mean_value = reduced_value / dom_all.size();
-  std::cout << "Mean value on finest grid: " << mean_value << " (from "
-            << reduced_value << " total)" << std::endl;
-  EXPECT_NEAR(mean_value, sinusoid_integral_analytical(dimensionality), 0.031);
+// Thin forwarding wrapper: preserves the original call syntax
+// (run_combination_technique<DDim..., ...>(instances, comm)) used at
+// every call site below, while keeping the explicitly-specified DDims
+// pack strictly separated (as a class-template argument list) from the
+// InstancesType parameter that must be deduced from the function
+// argument. See the comment on run_combination_technique_impl above for
+// why this split is required for correct CUDA compilation.
+template <typename... DDims, typename InstancesType>
+void run_combination_technique(InstancesType const &instances,
+                               paliwa::MPICommType comm) {
+  detail::run_combination_technique_impl<DDims...>{}(instances, comm);
 }
 
 template <size_t dimensionality, typename InstancesType>

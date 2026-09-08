@@ -24,6 +24,29 @@
 
 namespace paliwa {
 
+namespace detail {
+
+// Hoisted out of transform_in(): nvcc forbids a class type local to a
+// function from being used as a template argument captured by an
+// extended __device__/__host__ __device__ lambda (which device_params
+// is, via Kokkos::View<LevelOffsetParams*, ...>). Must live at
+// namespace scope. Templated on the 1D vector/element types so each
+// instantiation of transform_in still gets its own concrete type.
+template <typename DVect1D, typename DElem1D>
+struct LevelOffsetParams {
+  int offset;
+  double filter0, filter1, filter2;
+  DVect1D this_d_stride;
+  DVect1D virtual_length;
+  DVect1D line_stride;
+  DElem1D line_front;
+  DElem1D write_back_1d;
+  DElem1D operating_front_1d;
+  long int line_extent;
+};
+
+} // namespace detail
+
 template <typename DDimInWhichToTransform, typename ChunkSpanType,
           typename LevelRange, typename ExecSpace, typename... DDims>
 constexpr bool
@@ -34,24 +57,23 @@ transform_in(ChunkSpanType const strided_grid,
              std::vector<std::pair<int, std::array<double, 3>>> const
                  &lifting_offsets_and_coefficients,
              ExecSpace instance = ExecSpace()) {
-
   auto chunk_domain = strided_grid.domain();
   using DElem = ddc::DiscreteElement<DDims...>;
   using SDDom = ddc::StridedDiscreteDomain<DDims...>;
   constexpr size_t dimensionality = sizeof...(DDims);
 
+  using DElem1D = ddc::DiscreteElement<DDimInWhichToTransform>;
+  using DVect1D = ddc::DiscreteVector<DDimInWhichToTransform>;
+  using value_type = std::decay_t<decltype(strided_grid(chunk_domain.front()))>;
+
+  // Namespace-scope struct, instantiated here for this function's
+  // concrete DVect1D/DElem1D types. Safe to name in a KOKKOS_LAMBDA
+  // capture on GPU because it is no longer a local type.
+  using LevelOffsetParams = detail::LevelOffsetParams<DVect1D, DElem1D>;
+
   auto [even_domain_functor, odd_domain_functor] =
       get_even_and_odd_half_domain_functors<DDimInWhichToTransform, DDims...>();
 
-  // Pole domain (all dims except DDimInWhichToTransform, which is
-  // collapsed to extent 1) built from operating_domain rather than
-  // chunk_domain: chunk_domain may be a SparseDiscreteDomain (e.g. on
-  // the ghost-extended path), which has no .strides(). operating_domain
-  // is always a StridedDiscreteDomain, and its non-transform-dim
-  // structure is invariant across the level loop below (only the
-  // DDimInWhichToTransform component of current_level changes), so it's
-  // safe and correct to derive the pole structure once, up front, from
-  // the initial `level`.
   auto const initial_operating_domain = strided_domain_from_level<DDims...>(
       ddc::detail::array(level), ddc::detail::array(maximum_level));
 
@@ -68,11 +90,6 @@ transform_in(ChunkSpanType const strided_grid,
   DElem const pole_front = pole_domain.front();
   long int const n_poles = static_cast<long int>(pole_domain.size());
 
-  // Decompose a flat league index into the full-rank pole element
-  // (mixed-radix over the non-transform extents, honoring each dim's
-  // stride). The transform-dim component carried along here is a
-  // placeholder (extent 1 => always 0 offset), overwritten per line
-  // element below via replace_dim.
   auto pole_elem_from_index = KOKKOS_LAMBDA(long int idx)->DElem {
     std::array<long int, dimensionality> multi{};
     for (size_t d = 0; d < dimensionality; ++d) {
@@ -83,10 +100,16 @@ transform_in(ChunkSpanType const strided_grid,
     return pole_front + offset;
   };
 
-  ddc::DiscreteVector<DDims...> current_level(level);
+  // ---------------------------------------------------------------
+  // Precompute, once on the host, everything invariant across poles
+  // for each (level, offset) pair, in the original level-then-offset
+  // nesting order.
+  // ---------------------------------------------------------------
+  long int const n_filters =
+      static_cast<long int>(lifting_offsets_and_coefficients.size());
 
-  using TeamPolicy = Kokkos::TeamPolicy<ExecSpace>;
-  using TeamMember = typename TeamPolicy::member_type;
+  std::vector<LevelOffsetParams> host_params;
+  ddc::DiscreteVector<DDims...> current_level(level);
 
   for (long int current_1d_level : one_d_level_range) {
     assert(current_1d_level > 0);
@@ -96,11 +119,12 @@ transform_in(ChunkSpanType const strided_grid,
         ddc::detail::array(current_level), ddc::detail::array(maximum_level));
     auto const current_stride =
         operating_domain.strides().template get<DDimInWhichToTransform>();
-    auto const virtual_length = ddc::DiscreteVector<DDimInWhichToTransform>(
+    DVect1D const virtual_length(
         operating_domain.extents().template get<DDimInWhichToTransform>() *
         current_stride);
-    auto const this_d_stride =
-        ddc::DiscreteVector<DDimInWhichToTransform>(current_stride);
+    DVect1D const this_d_stride(current_stride);
+    auto const operating_front_1d =
+        ddc::select<DDimInWhichToTransform>(operating_domain.front());
 
     for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
       std::function<SDDom(SDDom const &)> coarsen_domain;
@@ -116,70 +140,107 @@ transform_in(ChunkSpanType const strided_grid,
           ddc::select<DDimInWhichToTransform>(write_to_domain.front());
       long int const line_extent = static_cast<long int>(
           write_to_domain.extents().template get<DDimInWhichToTransform>());
-      auto const line_stride =
-          write_to_domain.strides().template get<DDimInWhichToTransform>();
+      DVect1D const line_stride(
+          write_to_domain.strides().template get<DDimInWhichToTransform>());
       auto const write_back_1d =
           ddc::select<DDimInWhichToTransform>(write_to_domain.back());
-      auto const operating_front_1d =
-          ddc::select<DDimInWhichToTransform>(operating_domain.front());
 
-      TeamPolicy const policy(instance, static_cast<int>(n_poles),
-                              Kokkos::AUTO);
+      // Register-carry / peeled boundary handling below assumes
+      // stepping one line element forward moves exactly
+      // 2 * this_d_stride, i.e. upper_element(i) == lower_element(i+1).
+      // True for the standard even/odd lifting split.
+      assert(line_stride == DVect1D(2 * current_stride));
 
-      Kokkos::parallel_for(
-          policy, KOKKOS_LAMBDA(TeamMember const &team) {
-            long int const pole_idx = team.league_rank();
-            DElem const pole_elem = pole_elem_from_index(pole_idx);
-
-            Kokkos::parallel_for(
-                Kokkos::TeamThreadRange(team, line_extent),
-                [&](long int line_idx) {
-                  ddc::DiscreteElement<DDimInWhichToTransform> const
-                      line_elem =
-                          line_front +
-                          ddc::DiscreteVector<DDimInWhichToTransform>(
-                              line_idx * line_stride);
-                  DElem const ixyz =
-                      replace_dim<DDimInWhichToTransform>(pole_elem,
-                                                          line_elem);
-
-                  // TODO: remove these checks for efficiency. Can't be
-                  // deleted.
-                  if (!chunk_domain.contains(ixyz)) {
-                    return;
-                  }
-
-                  DElem lower_element = ixyz - this_d_stride;
-                  DElem upper_element = ixyz + this_d_stride;
-
-                  if ((offset == 1) &&
-                      (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
-                           this_d_stride >
-                       ddc::DiscreteElement<DDimInWhichToTransform>(
-                           write_back_1d))) {
-                    upper_element -= virtual_length;
-                  } else if ((offset == 0) &&
-                             (ddc::DiscreteElement<DDimInWhichToTransform>(
-                                  ixyz) <= operating_front_1d)) {
-                    lower_element += virtual_length;
-                  }
-
-                  if (!chunk_domain.contains(lower_element) ||
-                      !chunk_domain.contains(upper_element))
-                    return;
-
-                  using value_type =
-                      std::decay_t<decltype(strided_grid(ixyz))>;
-                  strided_grid(ixyz) =
-                      static_cast<value_type>(filter[0]) *
-                          strided_grid(lower_element) +
-                      static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
-                      static_cast<value_type>(filter[2]) *
-                          strided_grid(upper_element);
-                });
-          });
+      host_params.push_back(LevelOffsetParams{
+          offset, filter[0], filter[1], filter[2], this_d_stride,
+          virtual_length, line_stride, line_front, write_back_1d,
+          operating_front_1d, line_extent});
     }
   }
+
+  long int const n_levels =
+      static_cast<long int>(host_params.size()) / n_filters;
+
+  // WithoutInitializing: LevelOffsetParams members are fully
+  // overwritten by the deep_copy below, so we skip default
+  // construction on the device (also avoids requiring a
+  // device-annotated default ctor for DVect1D/DElem1D).
+  Kokkos::View<LevelOffsetParams *, typename ExecSpace::memory_space>
+      device_params(Kokkos::view_alloc(Kokkos::WithoutInitializing,
+                                        "transform_in_level_offset_params"),
+                     host_params.size());
+  auto host_view = Kokkos::create_mirror_view(device_params);
+  for (size_t i = 0; i < host_params.size(); ++i) {
+    host_view(i) = host_params[i];
+  }
+  Kokkos::deep_copy(device_params, host_view);
+
+  using RangePolicy = Kokkos::RangePolicy<ExecSpace>;
+  RangePolicy const policy(instance, 0, n_poles);
+
+  Kokkos::parallel_for(
+    policy, KOKKOS_LAMBDA(long int pole_idx) {
+      DElem const pole_elem = pole_elem_from_index(pole_idx);
+
+      long int idx = 0;
+      for (long int level_idx = 0; level_idx < n_levels; ++level_idx) {
+        for (long int offset_idx = 0; offset_idx < n_filters;
+             ++offset_idx, ++idx) {
+          LevelOffsetParams const &p = device_params(idx);
+          value_type const f0 = static_cast<value_type>(p.filter0);
+          value_type const f1 = static_cast<value_type>(p.filter1);
+          value_type const f2 = static_cast<value_type>(p.filter2);
+
+          DElem1D line_elem = p.line_front;
+          bool carry_valid = false;
+          value_type left{};
+
+          for (long int line_idx = 0; line_idx < p.line_extent;
+               ++line_idx, line_elem += p.line_stride) {
+            DElem const ixyz =
+                replace_dim<DDimInWhichToTransform>(pole_elem, line_elem);
+            DElem right_elem = ixyz + p.this_d_stride;
+
+            if ((p.offset == 1) && (line_idx == p.line_extent - 1) &&
+                (DElem1D(ixyz) + p.this_d_stride > p.write_back_1d)) {
+              right_elem -= p.virtual_length;
+            }
+
+            // TODO: contains() checks kept for correctness on
+            // partial/sparse-domain chunk_domains (see
+            // get_required_transform_domains_1d). Cannot be dropped.
+            if (!chunk_domain.contains(ixyz)) {
+              carry_valid = false;
+              continue;
+            }
+
+            DElem lower_element = ixyz - p.this_d_stride;
+            if ((p.offset == 0) && (line_idx == 0) &&
+                (DElem1D(ixyz) <= p.operating_front_1d)) {
+              lower_element += p.virtual_length;
+            }
+
+            if (!chunk_domain.contains(right_elem) ||
+                (!carry_valid && !chunk_domain.contains(lower_element))) {
+              carry_valid = false;
+              continue;
+            }
+
+            value_type const lower_val =
+                carry_valid ? left
+                            : static_cast<value_type>(strided_grid(lower_element));
+            value_type const middle = strided_grid(ixyz);
+            value_type const right = strided_grid(right_elem);
+
+            strided_grid(ixyz) = f0 * lower_val + f1 * middle + f2 * right;
+
+            left = right;
+            carry_valid = true;
+          }
+        }
+      }
+    });
+
   return true;
 }
 
