@@ -256,7 +256,24 @@ bool distributed_transform_in(
       ddc::select<DimToTransform>(minimum_level),
       ddc::select<DimToTransform>(maximum_level), wavelet_name);
 
-  if (ghost_domain_1d.size() == 0) {
+  // Compute peer exchanges (what we need / what they need — no MPI)
+  auto global_size_1d =
+      full_1d_strided.extents().template get<DimToTransform>() *
+      full_1d_strided.strides().template get<DimToTransform>();
+  ddc::DiscreteDomain<DimToTransform> global_domain_1d(
+      DElem1d(full_1d_strided.front()),
+      ddc::DiscreteVector<DimToTransform>(global_size_1d));
+
+  auto peers = compute_peer_exchanges<DimToTransform, IsHierarchization>(
+      classify_ghost_by_rank<DimToTransform>(ghost_domain_1d, global_domain_1d,
+                                             cart_comm, dim_index),
+      full_1d_strided, global_domain_1d,
+      ddc::select<DimToTransform>(local_domain), level, minimum_level,
+      maximum_level, wavelet_name, cart_comm, dim_index);
+
+  // No incoming ghosts does not imply no communication: another rank may
+  // still need our local coefficients (e.g. the coarse point of a tiny slab).
+  if (peers.empty()) {
     if constexpr (IsHierarchization) {
       return hierarchize_in<DimToTransform>(local_grid, level, minimum_level,
                                             maximum_level, wavelet_name,
@@ -295,21 +312,6 @@ bool distributed_transform_in(
                      [&](ddc::DiscreteElement<DDims...> elem) {
                        extended_span(elem) = local_grid(elem);
                      });
-
-  // Compute peer exchanges (what we need / what they need — no MPI)
-  auto global_size_1d =
-      full_1d_strided.extents().template get<DimToTransform>() *
-      full_1d_strided.strides().template get<DimToTransform>();
-  ddc::DiscreteDomain<DimToTransform> global_domain_1d(
-      DElem1d(full_1d_strided.front()),
-      ddc::DiscreteVector<DimToTransform>(global_size_1d));
-
-  auto peers = compute_peer_exchanges<DimToTransform, IsHierarchization>(
-      classify_ghost_by_rank<DimToTransform>(ghost_domain_1d, global_domain_1d,
-                                             cart_comm, dim_index),
-      full_1d_strided, global_domain_1d,
-      ddc::select<DimToTransform>(local_domain), level, minimum_level,
-      maximum_level, wavelet_name, cart_comm, dim_index);
 
   // Exchange ghost hyperplane slices
   exchange_ghost_slices<DimToTransform>(peers, local_grid, extended_span,
