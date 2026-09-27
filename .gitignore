@@ -46,3 +46,7 @@
 
 # build directories in same folder
 build*/
+
+# Spack development builds and Python recipe caches
+build-linux-*
+__pycache__/
