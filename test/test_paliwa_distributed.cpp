@@ -440,4 +440,43 @@ TEST(distributed, roundtrip_2d_all_wavelets) {
   distributed_roundtrip_2d_all_wavelets();
 }
 
+// A coarse-point owner may have no incoming ghosts while peers need its data.
+TEST(distributed, one_point_per_rank) {
+  using Dim = paliwa::DDimV;
+  using Element = ddc::DiscreteElement<Dim>;
+  using Vector = ddc::DiscreteVector<Dim>;
+  int size;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  if (size < 4) GTEST_SKIP() << "Need at least 4 ranks";
+  int ranks = 4, periodic = 1;
+  MPI_Comm cart;
+  MPI_Cart_create(MPI_COMM_WORLD, 1, &ranks, &periodic, 0, &cart);
+  if (cart == MPI_COMM_NULL) return;
+  int rank;
+  MPI_Comm_rank(cart, &rank);
+  Vector level(2), minimum(0);
+  auto full = paliwa::strided_domain_from_level<Dim>({2}, {2});
+  ddc::StridedDiscreteDomain<Dim> local(Element(rank), Vector(1), Vector(1));
+  ddc::Chunk local_chunk("local", local, ddc::HostAllocator<double>());
+  ddc::Chunk reference_chunk("reference", full, ddc::HostAllocator<double>());
+  auto span = local_chunk.span_view();
+  auto reference = reference_chunk.span_view();
+  for (const auto& wavelet : {"hat", "biorthogonal", "fullweighting"}) {
+    SCOPED_TRACE(wavelet);
+    ddc::host_for_each(full, [&](Element e) {
+      const auto i = e.uid<Dim>();
+      reference(e) = 1.0 + static_cast<double>(i * i);
+    });
+    const double original = reference(Element(rank));
+    span(Element(rank)) = original;
+    paliwa::hierarchize(reference, level, minimum, level, wavelet,
+                       Kokkos::DefaultHostExecutionSpace());
+    paliwa::distributed_hierarchize(span, full, level, minimum, level, wavelet, cart);
+    EXPECT_NEAR(span(Element(rank)), reference(Element(rank)), 1e-12);
+    paliwa::distributed_dehierarchize(span, full, level, minimum, level, wavelet, cart);
+    EXPECT_NEAR(span(Element(rank)), original, 1e-12);
+  }
+  MPI_Comm_free(&cart);
+}
+
 #endif // PALIWA_WITH_MPI
