@@ -361,8 +361,8 @@ auto combination_execution_instances(int max_instances = 32) {
   // OpenMP partitions need at least one thread each. Keep the stream count
   // usable on small machines and when OMP_NUM_THREADS limits concurrency.
   auto const count = std::clamp(instance.concurrency(), 1, max_instances);
-  return Kokkos::Experimental::partition_space(
-      instance, std::vector<int>(count, 1));
+  return Kokkos::Experimental::partition_space(instance,
+                                               std::vector<int>(count, 1));
 }
 } // namespace
 

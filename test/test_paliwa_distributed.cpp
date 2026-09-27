@@ -447,11 +447,13 @@ TEST(distributed, one_point_per_rank) {
   using Vector = ddc::DiscreteVector<Dim>;
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
-  if (size < 4) GTEST_SKIP() << "Need at least 4 ranks";
+  if (size < 4)
+    GTEST_SKIP() << "Need at least 4 ranks";
   int ranks = 4, periodic = 1;
   MPI_Comm cart;
   MPI_Cart_create(MPI_COMM_WORLD, 1, &ranks, &periodic, 0, &cart);
-  if (cart == MPI_COMM_NULL) return;
+  if (cart == MPI_COMM_NULL)
+    return;
   int rank;
   MPI_Comm_rank(cart, &rank);
   Vector level(2), minimum(0);
@@ -461,7 +463,7 @@ TEST(distributed, one_point_per_rank) {
   ddc::Chunk reference_chunk("reference", full, ddc::HostAllocator<double>());
   auto span = local_chunk.span_view();
   auto reference = reference_chunk.span_view();
-  for (const auto& wavelet : {"hat", "biorthogonal", "fullweighting"}) {
+  for (const auto &wavelet : {"hat", "biorthogonal", "fullweighting"}) {
     SCOPED_TRACE(wavelet);
     ddc::host_for_each(full, [&](Element e) {
       const auto i = e.uid<Dim>();
@@ -470,10 +472,12 @@ TEST(distributed, one_point_per_rank) {
     const double original = reference(Element(rank));
     span(Element(rank)) = original;
     paliwa::hierarchize(reference, level, minimum, level, wavelet,
-                       Kokkos::DefaultHostExecutionSpace());
-    paliwa::distributed_hierarchize(span, full, level, minimum, level, wavelet, cart);
+                        Kokkos::DefaultHostExecutionSpace());
+    paliwa::distributed_hierarchize(span, full, level, minimum, level, wavelet,
+                                    cart);
     EXPECT_NEAR(span(Element(rank)), reference(Element(rank)), 1e-12);
-    paliwa::distributed_dehierarchize(span, full, level, minimum, level, wavelet, cart);
+    paliwa::distributed_dehierarchize(span, full, level, minimum, level,
+                                      wavelet, cart);
     EXPECT_NEAR(span(Element(rank)), original, 1e-12);
   }
   MPI_Comm_free(&cart);
