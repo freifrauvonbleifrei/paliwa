@@ -8,6 +8,7 @@
 
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <iostream>
 #include <vector>
 
@@ -354,25 +355,29 @@ void run_combination_technique_in_dimensions(InstancesType const &instances,
   }
 }
 
+namespace {
+auto combination_execution_instances(int max_instances = 32) {
+  Kokkos::DefaultExecutionSpace instance;
+  // OpenMP partitions need at least one thread each. Keep the stream count
+  // usable on small machines and when OMP_NUM_THREADS limits concurrency.
+  auto const count = std::clamp(instance.concurrency(), 1, max_instances);
+  return Kokkos::Experimental::partition_space(
+      instance, std::vector<int>(count, 1));
+}
+} // namespace
+
 TEST(combination_technique, full_integration_2d) {
-  // use up to 32 concurrent streams
-  auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+  auto instances = combination_execution_instances();
   run_combination_technique_in_dimensions<2>(instances, MPI_COMM_WORLD);
 }
 
 TEST(combination_technique, full_integration_3d) {
-  auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+  auto instances = combination_execution_instances();
   run_combination_technique_in_dimensions<3>(instances, MPI_COMM_WORLD);
 }
 
 TEST(combination_technique, full_integration_4d) {
-  auto instances = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+  auto instances = combination_execution_instances();
   run_combination_technique_in_dimensions<4>(instances, MPI_COMM_WORLD);
 }
 
@@ -415,10 +420,7 @@ void test_distributed_combination_technique_2d() {
   DVect ddc_min(minimum_level), ddc_max(maximum_level);
   std::string const wavelet = "biorthogonal";
 
-  auto instances_arr = Kokkos::Experimental::partition_space(
-      Kokkos::DefaultExecutionSpace(), 1, 1, 1, 1, 1, 1, 1, 1);
-  std::vector<Kokkos::DefaultExecutionSpace> instances(instances_arr.begin(),
-                                                       instances_arr.end());
+  auto instances = combination_execution_instances(8);
 
   std::vector<SDDom> full_doms, local_doms;
   for (auto const &lv : all_levels) {
