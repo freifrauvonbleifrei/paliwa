@@ -59,7 +59,7 @@ jobs:
         mpiexec -n 1 ./test/paliwa_tests --gtest_filter='-distributed*'
         # Distributed tests
         mpiexec --oversubscribe -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
-        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*:distributed.one_point_per_rank'
         mpiexec --oversubscribe -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
     - name: Collect coverage
       run: |

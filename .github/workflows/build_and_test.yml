@@ -114,7 +114,7 @@ jobs:
         fi
         cd build
         $MPI_RUN -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
-        $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*'
+        $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*:distributed.one_point_per_rank'
         $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         $MPI_RUN -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
     - name: Run MUST correctness checks (MPI only)
