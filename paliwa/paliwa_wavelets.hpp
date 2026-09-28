@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <array>
+#include <map>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace paliwa {
