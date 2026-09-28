@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
+#include <complex>
 #include <random>
 #include <set>
 
@@ -146,13 +147,47 @@ TEST(transform_plan, multipass_sparse_values) {
               paliwa::domain_from_transform_bounds<PlanDim>(bounds, maximum);
           ddc::Chunk chunk(domain, ddc::HostAllocator<double>());
           auto grid = chunk.span_view();
+          for (auto order : {paliwa::PoleExecution::Direct,
+                             paliwa::PoleExecution::PackedPasses,
+                             paliwa::PoleExecution::PackedPoles}) {
+            ddc::host_for_each(
+                domain, [&](Element i) { grid(i) = input[i.uid<PlanDim>()]; });
+            paliwa::transform_in<PlanDim>(grid, Vector(level), Vector(maximum),
+                                          levels, filters, outputs, exec,
+                                          order);
+            exec.fence();
+            ddc::host_for_each(outputs, [&](Element i) {
+              EXPECT_NEAR(grid(i), reference[i.uid<PlanDim>()], 1e-12);
+            });
+          }
+          // The same exact plan with local strided data and remote-only
+          // sparse storage. Ghost values must remain unchanged.
+          Kokkos::View<Element *, Kokkos::SharedSpace> ghosts("ghosts",
+                                                              domain.size());
+          size_t n = 0;
+          ddc::host_for_each(domain, [&](Element i) {
+            if (!outputs.contains(i))
+              ghosts(n++) = i;
+          });
+          Kokkos::resize(ghosts, n);
+          ddc::SparseDiscreteDomain<PlanDim> remote_domain(ghosts);
+          ddc::Chunk local_chunk(outputs, ddc::HostAllocator<double>());
+          ddc::Chunk remote_chunk(remote_domain, ddc::HostAllocator<double>());
+          auto local = local_chunk.span_view();
+          auto remote = remote_chunk.span_view();
           ddc::host_for_each(
-              domain, [&](Element i) { grid(i) = input[i.uid<PlanDim>()]; });
-          paliwa::transform_in<PlanDim>(grid, Vector(level), Vector(maximum),
-                                        levels, filters, outputs, exec);
-          exec.fence();
+              outputs, [&](Element i) { local(i) = input[i.uid<PlanDim>()]; });
+          ddc::host_for_each(remote_domain, [&](Element i) {
+            remote(i) = input[i.uid<PlanDim>()];
+          });
+          paliwa::detail::transform_with_remote<PlanDim>(
+              local, remote, Vector(level), Vector(maximum), levels, filters,
+              outputs, exec, paliwa::PoleExecution::PackedPoles);
           ddc::host_for_each(outputs, [&](Element i) {
-            EXPECT_NEAR(grid(i), reference[i.uid<PlanDim>()], 1e-12);
+            EXPECT_NEAR(local(i), reference[i.uid<PlanDim>()], 1e-12);
+          });
+          ddc::host_for_each(remote_domain, [&](Element i) {
+            EXPECT_EQ(remote(i), input[i.uid<PlanDim>()]);
           });
         }
       }
@@ -169,4 +204,152 @@ TEST(transform_plan, nonconsecutive_levels_are_rejected) {
         paliwa::transform_bounds({0, 0}, 4, 4, levels, filters, ignore),
         std::invalid_argument);
   }
+}
+
+TEST(transform_plan, periodic_pole_cover) {
+  auto check = [](std::vector<long> indices, long min, long max) {
+    auto b = paliwa::covering_periodic_bounds(indices, 64);
+    EXPECT_EQ(b.min, min);
+    EXPECT_EQ(b.max, max);
+  };
+  check({}, -1, -1);
+  check({12}, 12, 12);
+  check({8, 12, 16}, 8, 16);
+  check({0, 4, 56, 60}, 56, 4);
+  check({0, 16, 32, 48}, 0, 48);
+}
+
+namespace {
+struct PoleAxis {};
+struct PoleDim : ddc::UniformPointSampling<PoleAxis> {};
+} // namespace
+
+TEST(transform_plan, packed_complex_poles) {
+  using Value = std::complex<double>;
+  using Vector = ddc::DiscreteVector<PlanDim, PoleDim>;
+  using Element = ddc::DiscreteElement<PlanDim, PoleDim>;
+  Vector const level(4, 3), maximum(6, 5);
+  auto domain = paliwa::strided_domain_from_level<PlanDim, PoleDim>(
+      ddc::detail::array(level), ddc::detail::array(maximum));
+  ddc::Chunk reference(domain, ddc::HostAllocator<Value>());
+  ddc::Chunk candidate(domain, ddc::HostAllocator<Value>());
+  auto expected = reference.span_view(), actual = candidate.span_view();
+  auto reset = [&](auto grid) {
+    ddc::host_for_each(domain, [&](Element i) {
+      grid(i) = Value(std::sin(i.uid<PlanDim>() + .3 * i.uid<PoleDim>()),
+                      std::cos(.7 * i.uid<PlanDim>() - i.uid<PoleDim>()));
+    });
+  };
+  Filters const filters{{1, {-.5, 1., .125}},
+                        {0, {0., 1., .25}},
+                        {0, {.125, 1., .125}},
+                        {1, {0., 1., .25}},
+                        {1, {-.25, 1., .125}}};
+  Kokkos::DefaultHostExecutionSpace exec;
+  auto check = [&]<typename Dim>() {
+    long const n = static_cast<long>(ddc::select<Dim>(level));
+    std::vector<long> levels;
+    for (long l = n; l > 0; --l)
+      levels.push_back(l);
+    for (bool inverse : {false, true}) {
+      if (inverse)
+        std::reverse(levels.begin(), levels.end());
+      reset(expected);
+      paliwa::transform_in<Dim>(expected, level, maximum, levels, filters,
+                                domain, exec, paliwa::PoleExecution::Direct);
+      for (auto order : {paliwa::PoleExecution::PackedPasses,
+                         paliwa::PoleExecution::PackedPoles}) {
+        reset(actual);
+        paliwa::transform_in<Dim>(actual, level, maximum, levels, filters,
+                                  domain, exec, order);
+        exec.fence();
+        ddc::host_for_each(domain, [&](Element i) {
+          EXPECT_NEAR(std::abs(actual(i) - expected(i)), 0., 1e-12);
+        });
+      }
+    }
+  };
+  check.template operator()<PlanDim>();
+  check.template operator()<PoleDim>();
+}
+
+TEST(transform_plan, remote_only_complex_poles) {
+  using Value = std::complex<double>;
+  using Element = ddc::DiscreteElement<PlanDim, PoleDim>;
+  using Vector = ddc::DiscreteVector<PlanDim, PoleDim>;
+  Vector const level(4, 3), maximum(6, 5);
+  auto const full = paliwa::strided_domain_from_level<PlanDim, PoleDim>(
+      ddc::detail::array(level), ddc::detail::array(maximum));
+  Filters const filters{{1, {-.5, 1., .125}},
+                        {0, {0., 1., .25}},
+                        {0, {.125, 1., .125}},
+                        {1, {0., 1., .25}},
+                        {1, {-.25, 1., .125}}};
+  auto value = [](Element e) {
+    return Value(std::sin(e.uid<PlanDim>() + .3 * e.uid<PoleDim>()),
+                 std::cos(.7 * e.uid<PlanDim>() - e.uid<PoleDim>()));
+  };
+  Kokkos::DefaultHostExecutionSpace exec;
+  auto check = [&]<typename Dim>() {
+    long const n = static_cast<long>(ddc::select<Dim>(level));
+    auto const axis = ddc::select<Dim>(full);
+    std::vector<long> levels;
+    for (long l = n; l > 0; --l)
+      levels.push_back(l);
+    for (bool inverse : {false, true}) {
+      if (inverse)
+        std::reverse(levels.begin(), levels.end());
+      ddc::Chunk reference_chunk(full, ddc::HostAllocator<Value>());
+      auto reference = reference_chunk.span_view();
+      ddc::host_for_each(full, [&](Element e) { reference(e) = value(e); });
+      paliwa::transform_in<Dim>(reference, level, maximum, levels, filters,
+                                full, exec, paliwa::PoleExecution::Direct);
+      // First and last slabs exercise periodic dependencies. The full slab
+      // exercises an empty remote allocation; both dimension orders are used.
+      long const size = static_cast<long>(axis.size());
+      for (auto [start, count] : std::vector<std::pair<long, long>>{
+               {0, size / 2}, {size / 2, size / 2}, {0, size}}) {
+        ddc::StridedDiscreteDomain<Dim> local_axis(
+            axis.front() + axis.strides() * start,
+            ddc::DiscreteVector<Dim>(count), axis.strides());
+        ddc::StridedDiscreteDomain<PlanDim, PoleDim> outputs(
+            local_axis, ddc::remove_dims_of<Dim>(full));
+        auto sparse_axis = [&](auto tag) {
+          using Axis = decltype(tag);
+          auto const source = ddc::select<Axis>(full);
+          Kokkos::View<ddc::DiscreteElement<Axis> *, Kokkos::SharedSpace>
+              indices("indices", source.size());
+          size_t count = 0;
+          ddc::host_for_each(source, [&](auto e) {
+            if constexpr (std::is_same_v<Axis, Dim>) {
+              if (local_axis.contains(e))
+                return;
+            }
+            indices(count++) = e;
+          });
+          Kokkos::resize(indices, count);
+          return ddc::SparseDiscreteDomain<Axis>(indices);
+        };
+        ddc::SparseDiscreteDomain<PlanDim, PoleDim> remote_domain(
+            sparse_axis(PlanDim{}), sparse_axis(PoleDim{}));
+        ddc::Chunk local_chunk(outputs, ddc::HostAllocator<Value>());
+        ddc::Chunk remote_chunk(remote_domain, ddc::HostAllocator<Value>());
+        auto local = local_chunk.span_view();
+        auto remote = remote_chunk.span_view();
+        ddc::host_for_each(outputs, [&](Element e) { local(e) = value(e); });
+        ddc::host_for_each(remote_domain,
+                           [&](Element e) { remote(e) = value(e); });
+        paliwa::detail::transform_with_remote<Dim>(
+            local, remote, level, maximum, levels, filters, outputs, exec,
+            paliwa::PoleExecution::PackedPoles);
+        ddc::host_for_each(outputs, [&](Element e) {
+          EXPECT_NEAR(std::abs(local(e) - reference(e)), 0., 1e-12);
+        });
+        ddc::host_for_each(remote_domain,
+                           [&](Element e) { EXPECT_EQ(remote(e), value(e)); });
+      }
+    }
+  };
+  check.template operator()<PlanDim>();
+  check.template operator()<PoleDim>();
 }

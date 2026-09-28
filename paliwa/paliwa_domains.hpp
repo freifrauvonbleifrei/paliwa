@@ -466,6 +466,23 @@ auto domain_from_transform_bounds(std::vector<PeriodicBounds> const &bounds,
   return ddc::SparseDiscreteDomain<Dim>(elements);
 }
 
+// Smallest circular interval containing sorted, distinct indices
+inline PeriodicBounds covering_periodic_bounds(std::vector<long> const &indices,
+                                               long period) {
+  if (indices.empty())
+    return {};
+  PeriodicBounds result{indices.front(), indices.back()};
+  long largest_gap = indices.front() + period - indices.back();
+  for (size_t i = 1; i < indices.size(); ++i) {
+    long const gap = indices[i] - indices[i - 1];
+    if (gap > largest_gap) {
+      largest_gap = gap;
+      result = {indices[i], indices[i - 1]};
+    }
+  }
+  return result;
+}
+
 // Intersect one axis of a strided domain with a periodic interval. A wrapped
 // interval becomes two ordinary domains; alignment always uses global parity.
 template <typename Dim, typename... Dims>
