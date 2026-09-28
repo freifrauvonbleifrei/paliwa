@@ -5,4 +5,5 @@
 # (cf. https://github.com/dev-build-deploy/reuse-me/issues/189)
 
 repo:
+  namespace: paliwa
   api: v2.2

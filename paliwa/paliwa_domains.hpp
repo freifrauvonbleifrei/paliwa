@@ -4,7 +4,14 @@
 
 #pragma once
 
+#include "paliwa_wavelets.hpp"
+#include <algorithm>
+#include <array>
 #include <ddc/ddc.hpp>
+#include <map>
+#include <ranges>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace paliwa {
@@ -304,4 +311,296 @@ ddc::SparseDiscreteDomain<DDims...> union_of_sparse_domains(
       ddc::SparseDiscreteDomain<DDims>(second_sparse_domain))...);
 }
 
+// Inclusive periodic bounds in finest-level coordinates. min > max wraps;
+// {-1, -1} is empty. The stride is supplied by the hierarchical level/pass.
+struct PeriodicBounds {
+  long min = -1;
+  long max = -1;
+  bool empty() const { return min < 0; }
+};
+
+namespace detail {
+// Work on an unwrapped axis so expansion across zero needs no special cases.
+struct LevelInterval {
+  long min = 1;
+  long max = 0;
+  bool empty() const { return min > max; }
+
+  LevelInterval aligned(long stride, long offset) const {
+    if (empty())
+      return {};
+    auto mod = [stride](long x) { return (x % stride + stride) % stride; };
+    return {min + mod(offset - min), max - mod(max - offset)};
+  }
+
+  void include(LevelInterval other) {
+    if (other.empty())
+      return;
+    if (empty())
+      *this = other;
+    else {
+      min = std::min(min, other.min);
+      max = std::max(max, other.max);
+    }
+  }
+
+  PeriodicBounds periodic(long period, long stride, long offset) const {
+    if (empty())
+      return {};
+    // Canonical full interval on this lattice; never enumerate a point twice.
+    if ((max - min) / stride + 1 >= period / stride)
+      return {offset, period - stride + offset};
+    auto mod = [period](long x) { return (x % period + period) % period; };
+    return {mod(min), mod(max)};
+  }
+};
+} // namespace detail
+
+// Dependency state: one interval for each hierarchical level's odd points;
+// level zero holds the periodic coarse point. This partitions the grid, so
+// coarse even-only requirements never create spurious finer-level odd points.
+// Visit writes backwards; callers may save the small pass bounds to execute
+// forwards. No coefficient values are inspected: every stencil reads all taps.
+template <typename LevelRange, typename VisitPass>
+std::vector<PeriodicBounds> transform_bounds(
+    PeriodicBounds outputs, long level, long maximum_level,
+    LevelRange const &levels,
+    std::vector<std::pair<int, std::array<double, 3>>> const &filters,
+    VisitPass visit_pass) {
+  // Consecutive levels preserve the interval invariant. Skipping a level can
+  // leave holes among its even points and requires a more general set planner.
+  std::vector<long> ordered_levels(levels.begin(), levels.end());
+  if (ordered_levels.size() > 1) {
+    long const step = ordered_levels[1] - ordered_levels[0];
+    if (step != 1 && step != -1)
+      throw std::invalid_argument("Transform levels must be consecutive");
+    for (size_t i = 1; i < ordered_levels.size(); ++i)
+      if (ordered_levels[i] - ordered_levels[i - 1] != step)
+        throw std::invalid_argument(
+            "Transform levels must be monotone and consecutive");
+  }
+  long const period = 1L << maximum_level;
+  std::vector<detail::LevelInterval> required(level + 1);
+  auto lattice_stride = [&](long l) {
+    return l == 0 ? period : 2L << (maximum_level - l);
+  };
+  auto lattice_offset = [&](long l) {
+    return l == 0 ? 0L : 1L << (maximum_level - l);
+  };
+  detail::LevelInterval output_interval;
+  if (!outputs.empty()) {
+    output_interval = {outputs.min,
+                       outputs.max + (outputs.min > outputs.max ? period : 0)};
+  }
+  for (long l = 0; l <= level; ++l)
+    required[l] = output_interval.aligned(lattice_stride(l), lattice_offset(l));
+
+  for (size_t i = ordered_levels.size(); i-- > 0;) {
+    long const l = ordered_levels[i];
+    if (l < 1 || l > level)
+      throw std::invalid_argument("Invalid transform level");
+    long const stride = 1L << (maximum_level - l);
+    for (size_t pass = filters.size(); pass-- > 0;) {
+      int const offset = filters[pass].first;
+      if (offset != 0 && offset != 1)
+        throw std::invalid_argument("Filter offset not supported");
+      auto writes = required[l];
+      if (offset == 0) {
+        writes = {};
+        // Even points at this level are precisely the coarser levels.
+        for (long h = 0; h < l; ++h)
+          writes.include(required[h]);
+      }
+      visit_pass(i, pass, writes.periodic(period, 2 * stride, offset * stride));
+      if (writes.empty())
+        continue;
+      detail::LevelInterval const neighbors{writes.min - stride,
+                                            writes.max + stride};
+      if (offset == 0) {
+        required[l].include(neighbors.aligned(2 * stride, stride));
+      } else {
+        for (long h = 0; h < l; ++h)
+          required[h].include(
+              neighbors.aligned(lattice_stride(h), lattice_offset(h)));
+      }
+    }
+  }
+  std::vector<PeriodicBounds> bounds(level + 1);
+  for (long l = 0; l <= level; ++l)
+    bounds[l] =
+        required[l].periodic(period, lattice_stride(l), lattice_offset(l));
+  return bounds;
+}
+
+// Visit the disjoint level intervals without allocating sparse storage.
+template <typename Dim, typename Visit>
+void for_each_transform_index(std::vector<PeriodicBounds> const &bounds,
+                              long maximum_level, Visit visit) {
+  long const period = 1L << maximum_level;
+  for (size_t l = 0; l < bounds.size(); ++l) {
+    auto const b = bounds[l];
+    if (b.empty())
+      continue;
+    long const stride = l == 0 ? period : 2L << (maximum_level - l);
+    long const last = b.max + (b.min > b.max ? period : 0);
+    for (long x = b.min; x <= last; x += stride)
+      visit(ddc::DiscreteElement<Dim>(x % period));
+  }
+}
+
+// Materialize the disjoint level intervals only where sparse storage is needed.
+template <typename Dim>
+auto domain_from_transform_bounds(std::vector<PeriodicBounds> const &bounds,
+                                  long maximum_level) {
+  using Element = ddc::DiscreteElement<Dim>;
+  size_t count = 0;
+  for_each_transform_index<Dim>(bounds, maximum_level,
+                                [&](Element) { ++count; });
+  Kokkos::View<Element *, Kokkos::SharedSpace> elements("required_elements",
+                                                        count);
+  size_t i = 0;
+  for_each_transform_index<Dim>(bounds, maximum_level,
+                                [&](Element x) { elements(i++) = x; });
+  if (count > 1)
+    std::sort(elements.data(), elements.data() + count);
+  return ddc::SparseDiscreteDomain<Dim>(elements);
+}
+
+// Intersect one axis of a strided domain with a periodic interval. A wrapped
+// interval becomes two ordinary domains; alignment always uses global parity.
+template <typename Dim, typename... Dims>
+std::vector<ddc::StridedDiscreteDomain<Dims...>>
+restrict_periodic_bounds(ddc::StridedDiscreteDomain<Dims...> const &domain,
+                         PeriodicBounds bounds, long period) {
+  std::vector<ddc::StridedDiscreteDomain<Dims...>> result;
+  if (bounds.empty() || domain.empty())
+    return result;
+  long const first = domain.front().template uid<Dim>();
+  long const last = domain.back().template uid<Dim>();
+  long const stride = domain.strides().template get<Dim>();
+  auto append = [&](long lower, long upper) {
+    lower = std::max(lower, first);
+    upper = std::min(upper, last);
+    long const begin = first + ((lower - first + stride - 1) / stride) * stride;
+    if (begin > upper)
+      return;
+    auto extents = domain.extents();
+    extents.template get<Dim>() = (upper - begin) / stride + 1;
+    result.emplace_back(
+        replace_dim(domain.front(), ddc::DiscreteElement<Dim>(begin)), extents,
+        domain.strides());
+  };
+  if (bounds.min <= bounds.max) {
+    append(bounds.min, bounds.max);
+  } else {
+    append(bounds.min, period - 1);
+    append(0, bounds.max);
+  }
+  return result;
+}
+
+// Use the global transform axis and local pole coordinates in other axes.
+template <typename Dim, typename... Dims>
+auto local_pole_domain(ddc::StridedDiscreteDomain<Dims...> const &global,
+                       ddc::StridedDiscreteDomain<Dims...> const &local) {
+  return ddc::StridedDiscreteDomain<Dims...>(
+      replace_dim(local.front(), ddc::select<Dim>(global.front())),
+      ddc::DiscreteVector<Dims...>([&]() {
+        if constexpr (std::is_same_v<Dims, Dim>)
+          return global.extents().template get<Dims>();
+        else
+          return local.extents().template get<Dims>();
+      }()...),
+      ddc::DiscreteVector<Dims...>([&]() {
+        if constexpr (std::is_same_v<Dims, Dim>)
+          return global.strides().template get<Dims>();
+        else
+          return local.strides().template get<Dims>();
+      }()...));
+}
+
+template <typename SelectedDim, typename SDDom, typename DDom>
+constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
+    bool is_for_hierarchization, SDDom const &full_domain,
+    DDom const &local_domain, ddc::DiscreteVector<SelectedDim> const &level,
+    ddc::DiscreteVector<SelectedDim> const &minimum_level,
+    ddc::DiscreteVector<SelectedDim> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  std::vector<long> levels;
+  for (long l = static_cast<long>(minimum_level) + 1;
+       l <= static_cast<long>(level); ++l)
+    levels.push_back(l);
+  if (is_for_hierarchization)
+    std::ranges::reverse(levels);
+  auto const &filters =
+      is_for_hierarchization
+          ? lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name)
+          : lifting_wavelet_reconstruct_offsets_and_coefficients.at(
+                wavelet_name);
+  PeriodicBounds outputs;
+  if (!local_domain.empty())
+    outputs = {
+        static_cast<long>(local_domain.front().template uid<SelectedDim>()),
+        static_cast<long>(local_domain.back().template uid<SelectedDim>())};
+  long const max_level = static_cast<long>(maximum_level);
+  auto const bounds =
+      transform_bounds(outputs, static_cast<long>(level), max_level, levels,
+                       filters, [](size_t, size_t, PeriodicBounds) {});
+  auto const required =
+      domain_from_transform_bounds<SelectedDim>(bounds, max_level);
+  using Element = ddc::DiscreteElement<SelectedDim>;
+  Kokkos::View<Element *, Kokkos::SharedSpace> ghosts("ghost_elements",
+                                                      required.size());
+  size_t count = 0;
+  ddc::host_for_each(required, [&](Element i) {
+    if (!full_domain.contains(i))
+      throw std::runtime_error("Required input outside full domain");
+    if (!local_domain.contains(i))
+      ghosts(count++) = i;
+  });
+  Kokkos::resize(ghosts, count);
+  return ddc::SparseDiscreteDomain<SelectedDim>(ghosts);
+}
+
+template <typename DDom, typename HeadTag, typename... DDims>
+constexpr ddc::SparseDiscreteDomain<HeadTag, DDims...>
+get_required_transform_domains_recursive(
+    bool is_for_hierarchization,
+    ddc::StridedDiscreteDomain<HeadTag, DDims...> const &full_domain,
+    DDom const &local_domain,
+    ddc::DiscreteVector<HeadTag, DDims...> const &level,
+    ddc::DiscreteVector<HeadTag, DDims...> const &minimum_level,
+    ddc::DiscreteVector<HeadTag, DDims...> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  auto head_domain = get_required_transform_domain<HeadTag>(
+      is_for_hierarchization, ddc::select<HeadTag>(full_domain),
+      ddc::select<HeadTag>(local_domain), ddc::select<HeadTag>(level),
+      ddc::select<HeadTag>(minimum_level), ddc::select<HeadTag>(maximum_level),
+      wavelet_name);
+  if constexpr (sizeof...(DDims) == 0) {
+    return head_domain;
+  } else {
+    return ddc::SparseDiscreteDomain<HeadTag, DDims...>(
+        head_domain,
+        get_required_transform_domains_recursive(
+            is_for_hierarchization, ddc::select<DDims...>(full_domain),
+            ddc::select<DDims...>(local_domain), ddc::select<DDims...>(level),
+            ddc::select<DDims...>(minimum_level),
+            ddc::select<DDims...>(maximum_level), wavelet_name));
+  }
+}
+
+template <typename DDom, typename... DDims>
+constexpr ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
+    bool is_for_hierarchization,
+    ddc::StridedDiscreteDomain<DDims...> const &full_domain,
+    DDom const &local_domain, ddc::DiscreteVector<DDims...> const &level,
+    ddc::DiscreteVector<DDims...> const &minimum_level,
+    ddc::DiscreteVector<DDims...> const &maximum_level,
+    std::string const &wavelet_name = "hat") {
+  return ddc::SparseDiscreteDomain<DDims...>(
+      get_required_transform_domains_recursive(
+          is_for_hierarchization, full_domain, local_domain, level,
+          minimum_level, maximum_level, wavelet_name));
+}
 } // namespace paliwa

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <array>
 #include <map>
 #include <set>
 #include <vector>
@@ -23,6 +24,15 @@ namespace paliwa {
 #ifdef PALIWA_WITH_MPI
 
 namespace detail {
+
+template <std::size_t N>
+constexpr std::array<int, N> identity_cartesian_axes() {
+  std::array<int, N> axes{};
+  for (std::size_t d = 0; d < N; ++d) {
+    axes[d] = static_cast<int>(d);
+  }
+  return axes;
+}
 
 /// Info for a single peer in the "ghost" exchange.
 template <typename DElem1d> struct PeerExchange {
@@ -271,18 +281,32 @@ bool distributed_transform_in(
       ddc::select<DimToTransform>(local_domain), level, minimum_level,
       maximum_level, wavelet_name, cart_comm, dim_index);
 
+  auto const local_restricted =
+      restrict_strided_with_discrete(full_strided_domain, local_domain);
+  auto const increasing = std::views::iota(
+      static_cast<long>(ddc::select<DimToTransform>(minimum_level)) + 1,
+      static_cast<long>(ddc::select<DimToTransform>(level)) + 1);
+  auto transform = [&](auto grid) {
+    if constexpr (IsHierarchization) {
+      transform_in<DimToTransform>(
+          grid, level, maximum_level, increasing | std::views::reverse,
+          lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
+          local_restricted, instance);
+    } else {
+      transform_in<DimToTransform>(
+          grid, level, maximum_level, increasing,
+          lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
+          local_restricted, instance);
+    }
+    instance.fence();
+  };
+
   // No incoming ghosts does not imply no communication: another rank may
   // still need our local coefficients (e.g. the coarse point of a tiny slab).
+  // Even without peers, restrict writes to the local poles in other dimensions.
   if (peers.empty()) {
-    if constexpr (IsHierarchization) {
-      return hierarchize_in<DimToTransform>(local_grid, level, minimum_level,
-                                            maximum_level, wavelet_name,
-                                            instance);
-    } else {
-      return dehierarchize_in<DimToTransform>(local_grid, level, minimum_level,
-                                              maximum_level, wavelet_name,
-                                              instance);
-    }
+    transform(local_grid);
+    return true;
   }
 
   // Extended 1D domain: local ∪ ghost
@@ -306,8 +330,6 @@ bool distributed_transform_in(
   auto extended_span = extended_chunk.span_view();
 
   // Copy local data into extended chunk
-  auto local_restricted =
-      restrict_strided_with_discrete(full_strided_domain, local_domain);
   ddc::host_for_each(local_restricted,
                      [&](ddc::DiscreteElement<DDims...> elem) {
                        extended_span(elem) = local_grid(elem);
@@ -318,14 +340,7 @@ bool distributed_transform_in(
                                         local_restricted, local_restricted_1d,
                                         cart_comm);
 
-  // Run transform on the multi-D extended chunk
-  if constexpr (IsHierarchization) {
-    hierarchize_in<DimToTransform>(extended_span, level, minimum_level,
-                                   maximum_level, wavelet_name, instance);
-  } else {
-    dehierarchize_in<DimToTransform>(extended_span, level, minimum_level,
-                                     maximum_level, wavelet_name, instance);
-  }
+  transform(extended_span);
 
   // Copy local results back
   ddc::host_for_each(local_restricted,
@@ -345,11 +360,12 @@ void distributed_hierarchize_impl(
     ddc::DiscreteVector<DDims...> const &minimum_level,
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm, ExecSpace instance,
+    std::array<int, sizeof...(DDims)> const &cartesian_axes,
     std::index_sequence<Is...>) {
   [[maybe_unused]] bool unused =
       (distributed_transform_in<DDims, true>(
            local_grid, full_strided_domain, level, minimum_level, maximum_level,
-           wavelet_name, cart_comm, static_cast<int>(Is), instance) &&
+           wavelet_name, cart_comm, cartesian_axes[Is], instance) &&
        ...);
 }
 
@@ -362,11 +378,12 @@ void distributed_dehierarchize_impl(
     ddc::DiscreteVector<DDims...> const &minimum_level,
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm, ExecSpace instance,
+    std::array<int, sizeof...(DDims)> const &cartesian_axes,
     std::index_sequence<Is...>) {
   [[maybe_unused]] bool unused =
       (distributed_transform_in<DDims, false>(
            local_grid, full_strided_domain, level, minimum_level, maximum_level,
-           wavelet_name, cart_comm, static_cast<int>(Is), instance) &&
+           wavelet_name, cart_comm, cartesian_axes[Is], instance) &&
        ...);
 }
 
@@ -374,6 +391,8 @@ void distributed_dehierarchize_impl(
 
 /**
  * @brief Distributed hierarchization across all dimensions.
+ * @param cartesian_axes Permutation mapping each domain dimension to an axis
+ * of cart_comm. Defaults to the domain dimension order.
  *
  * Processes each dimension sequentially, exchanging ghost data before each
  * dimension's transform (since previous dimensions modify the data).
@@ -390,14 +409,19 @@ void distributed_hierarchize(
     ddc::DiscreteVector<DDims...> const &minimum_level,
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm,
-    ExecSpace instance = ExecSpace()) {
+    ExecSpace instance = ExecSpace(),
+    std::array<int, sizeof...(DDims)> const &cartesian_axes =
+        detail::identity_cartesian_axes<sizeof...(DDims)>()) {
   detail::distributed_hierarchize_impl(
       local_grid, full_strided_domain, level, minimum_level, maximum_level,
-      wavelet_name, cart_comm, instance, std::index_sequence_for<DDims...>{});
+      wavelet_name, cart_comm, instance, cartesian_axes,
+      std::index_sequence_for<DDims...>{});
 }
 
 /**
  * @brief Distributed dehierarchization across all dimensions.
+ * @param cartesian_axes Permutation mapping each domain dimension to an axis
+ * of cart_comm. Defaults to the domain dimension order.
  */
 template <typename ChunkSpanType,
           typename ExecSpace = Kokkos::DefaultHostExecutionSpace,
@@ -409,10 +433,13 @@ void distributed_dehierarchize(
     ddc::DiscreteVector<DDims...> const &minimum_level,
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm,
-    ExecSpace instance = ExecSpace()) {
+    ExecSpace instance = ExecSpace(),
+    std::array<int, sizeof...(DDims)> const &cartesian_axes =
+        detail::identity_cartesian_axes<sizeof...(DDims)>()) {
   detail::distributed_dehierarchize_impl(
       local_grid, full_strided_domain, level, minimum_level, maximum_level,
-      wavelet_name, cart_comm, instance, std::index_sequence_for<DDims...>{});
+      wavelet_name, cart_comm, instance, cartesian_axes,
+      std::index_sequence_for<DDims...>{});
 }
 
 #endif // PALIWA_WITH_MPI

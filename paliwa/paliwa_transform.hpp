@@ -15,87 +15,128 @@
 
 namespace paliwa {
 
-template <typename DDimInWhichToTransform, typename ChunkSpanType,
-          typename LevelRange, // TODO input_range concept
-          typename ExecSpace,  // todo = Kokkos::DefaultExecutionSpace,
-          typename... DDims>
+namespace detail {
+template <bool CheckBounds, typename Dim, typename Chunk, typename Domain,
+          typename ExecSpace>
+void lifting_pass(Chunk grid, Domain const &writes, long stride, long period,
+                  std::array<double, 3> const &filter, ExecSpace instance) {
+  auto const storage = grid.domain();
+  ddc::parallel_for_each(
+      instance, writes, KOKKOS_LAMBDA(auto i) {
+        if constexpr (CheckBounds) {
+          if (!storage.contains(i))
+            return;
+        }
+        auto lower = i;
+        auto upper = i;
+        long const x = i.template uid<Dim>();
+        lower = replace_dim(lower, ddc::DiscreteElement<Dim>(
+                                       x == 0 ? period - stride : x - stride));
+        upper = replace_dim(upper, ddc::DiscreteElement<Dim>(
+                                       x + stride == period ? 0 : x + stride));
+        if constexpr (CheckBounds) {
+          if (!storage.contains(lower) || !storage.contains(upper))
+            return;
+        }
+        using Value = std::decay_t<decltype(grid(i))>;
+        grid(i) = static_cast<Value>(filter[0]) * grid(lower) +
+                  static_cast<Value>(filter[1]) * grid(i) +
+                  static_cast<Value>(filter[2]) * grid(upper);
+      });
+}
+} // namespace detail
+
+// Existing API: complete strided grids need no membership checks. Partial
+// buffers without an explicit output domain retain their checked behavior.
+template <typename Dim, typename Chunk, typename LevelRange, typename ExecSpace,
+          typename... Dims>
 constexpr bool
-transform_in(ChunkSpanType const strided_grid,
-             ddc::DiscreteVector<DDims...> const &level,
-             ddc::DiscreteVector<DDims...> const &maximum_level,
-             LevelRange const &one_d_level_range,
-             std::vector<std::pair<int, std::array<double, 3>>> const
-                 &lifting_offsets_and_coefficients,
+transform_in(Chunk grid, ddc::DiscreteVector<Dims...> const &level,
+             ddc::DiscreteVector<Dims...> const &maximum_level,
+             LevelRange const &levels,
+             std::vector<std::pair<int, std::array<double, 3>>> const &filters,
              ExecSpace instance = ExecSpace()) {
-  auto chunk_domain = strided_grid.domain(); // derive from grid
-  using DElem = ddc::DiscreteElement<DDims...>;
-  using SDDom = ddc::StridedDiscreteDomain<DDims...>;
-  auto [even_domain_functor, odd_domain_functor] =
-      get_even_and_odd_half_domain_functors<DDimInWhichToTransform, DDims...>();
-
-  ddc::DiscreteVector<DDims...> current_level(level);
-  for (long int current_1d_level : one_d_level_range) {
-    assert(current_1d_level > 0);
-    current_level.template get<DDimInWhichToTransform>() = current_1d_level;
-    auto const operating_domain = strided_domain_from_level<DDims...>(
-        ddc::detail::array(current_level), ddc::detail::array(maximum_level));
-    auto const current_stride =
-        operating_domain.strides().template get<DDimInWhichToTransform>();
-    auto const virtual_length = ddc::DiscreteVector<DDimInWhichToTransform>(
-        operating_domain.extents().template get<DDimInWhichToTransform>() *
-        current_stride);
-    auto const this_d_stride =
-        ddc::DiscreteVector<DDimInWhichToTransform>(current_stride);
-
-    for (auto const &[offset, filter] : lifting_offsets_and_coefficients) {
-      // access chunk at every other point in transform dimension
-      std::function<SDDom(SDDom const &)> coarsen_domain;
-      if (offset == 0) {
-        coarsen_domain = even_domain_functor;
-      } else if (offset == 1) {
-        coarsen_domain = odd_domain_functor;
-      } else {
+  using Domain = ddc::StridedDiscreteDomain<Dims...>;
+  auto const full = strided_domain_from_level<Dims...>(
+      ddc::detail::array(level), ddc::detail::array(maximum_level));
+  bool complete = false;
+  if constexpr (std::is_same_v<std::decay_t<decltype(grid.domain())>, Domain>)
+    complete = grid.domain() == full;
+  auto [even, odd] = get_even_and_odd_half_domain_functors<Dim, Dims...>();
+  auto current = level;
+  for (long l : levels) {
+    assert(l > 0);
+    current.template get<Dim>() = l;
+    auto const operating = strided_domain_from_level<Dims...>(
+        ddc::detail::array(current), ddc::detail::array(maximum_level));
+    long const stride = operating.strides().template get<Dim>();
+    long const period = stride * operating.extents().template get<Dim>();
+    for (auto const &[offset, filter] : filters) {
+      if (offset != 0 && offset != 1)
         throw std::runtime_error("Filter offset not supported");
-      }
-      auto const write_to_domain = coarsen_domain(operating_domain);
-
-      ddc::parallel_for_each(
-          instance, write_to_domain, KOKKOS_LAMBDA(DElem const ixyz) {
-            // TODO remove these checks for efficiency
-            if (!chunk_domain.contains(ixyz)) {
-              return;
-            }
-            // check for out of bounds, periodic if necessary
-            DElem lower_element = ixyz - this_d_stride;
-            DElem upper_element = ixyz + this_d_stride;
-            if ((offset == 1) &&
-                (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) +
-                     this_d_stride >
-                 ddc::DiscreteElement<DDimInWhichToTransform>(
-                     write_to_domain.back()))) {
-              // on the upper boundary, no +1 available
-              // TODO make separate step to avoid branch here?
-              upper_element -= virtual_length;
-            } else if ((offset == 0) &&
-                       (ddc::DiscreteElement<DDimInWhichToTransform>(ixyz) <=
-                        ddc::select<DDimInWhichToTransform>(
-                            operating_domain.front()))) {
-              // on the lower boundary, no -1 available
-              lower_element += virtual_length;
-            }
-            if (!chunk_domain.contains(lower_element) ||
-                !chunk_domain.contains(upper_element)) {
-              return;
-            }
-            using value_type = std::decay_t<decltype(strided_grid(ixyz))>;
-            strided_grid(ixyz) =
-                static_cast<value_type>(filter[0]) *
-                    strided_grid(lower_element) +
-                static_cast<value_type>(filter[1]) * strided_grid(ixyz) +
-                static_cast<value_type>(filter[2]) *
-                    strided_grid(upper_element);
-          });
+      auto const writes = offset == 0 ? even(operating) : odd(operating);
+      if (complete)
+        detail::lifting_pass<false, Dim>(grid, writes, stride, period, filter,
+                                         instance);
+      else
+        detail::lifting_pass<true, Dim>(grid, writes, stride, period, filter,
+                                        instance);
     }
+  }
+  return true;
+}
+
+// Plan exact writes for the requested output domain.
+// Storage must contain the exact required inputs computed below.
+template <typename Dim, typename Chunk, typename LevelRange, typename ExecSpace,
+          typename... Dims>
+constexpr bool transform_in(
+    Chunk grid, ddc::DiscreteVector<Dims...> const &level,
+    ddc::DiscreteVector<Dims...> const &maximum_level, LevelRange const &levels,
+    std::vector<std::pair<int, std::array<double, 3>>> const &filters,
+    ddc::StridedDiscreteDomain<Dims...> const &outputs, ExecSpace instance) {
+  auto const local_axis = ddc::select<Dim>(outputs);
+  if (outputs.empty())
+    return true;
+  long const max_level = static_cast<long>(ddc::select<Dim>(maximum_level));
+  long const period = 1L << max_level;
+  std::vector<long> ordered_levels(levels.begin(), levels.end());
+  std::vector<std::vector<PeriodicBounds>> writes_by_level(
+      ordered_levels.size(), std::vector<PeriodicBounds>(filters.size()));
+  auto const bounds = transform_bounds(
+      {static_cast<long>(local_axis.front().template uid<Dim>()),
+       static_cast<long>(local_axis.back().template uid<Dim>())},
+      static_cast<long>(ddc::select<Dim>(level)), max_level, ordered_levels,
+      filters, [&](size_t i, size_t pass, PeriodicBounds writes) {
+        writes_by_level[i][pass] = writes;
+      });
+  for_each_transform_index<Dim>(bounds, max_level, [&](auto i) {
+    if (!ddc::select<Dim>(grid.domain()).contains(i))
+      throw std::runtime_error(
+          "Transform domain is missing required input values");
+  });
+  auto [even, odd] = get_even_and_odd_half_domain_functors<Dim, Dims...>();
+  auto current = level;
+  size_t index = 0;
+  for (long l : levels) {
+    current.template get<Dim>() = l;
+    auto const operating = strided_domain_from_level<Dims...>(
+        ddc::detail::array(current), ddc::detail::array(maximum_level));
+    long const stride = 1L << (max_level - l);
+    for (size_t pass = 0; pass < filters.size(); ++pass) {
+      auto const &[offset, filter] = filters[pass];
+      if (offset != 0 && offset != 1)
+        throw std::runtime_error("Filter offset not supported");
+      auto const writes = local_pole_domain<Dim>(
+          offset == 0 ? even(operating) : odd(operating), outputs);
+      auto const pass_bounds = writes_by_level[index][pass];
+      for (auto const &part :
+           restrict_periodic_bounds<Dim>(writes, pass_bounds, period)) {
+        detail::lifting_pass<false, Dim>(grid, part, stride, period, filter,
+                                         instance);
+      }
+    }
+    ++index;
   }
   return true;
 }
@@ -187,164 +228,4 @@ constexpr void dehierarchize(ChunkSpanType const strided_grid,
        ...);
 }
 
-template <typename DDim, typename ChunkSpanType, typename LevelRange,
-          typename ExecSpace = Kokkos::DefaultHostExecutionSpace>
-constexpr void
-transform_mask(ChunkSpanType const strided_grid,
-               ddc::DiscreteVector<DDim> const &level,
-               ddc::DiscreteVector<DDim> const &maximum_level,
-               LevelRange const &one_d_level_range,
-               std::vector<std::pair<int, std::array<double, 3>>> const
-                   &lifting_offsets_and_coefficients,
-               ExecSpace instance = ExecSpace()) {
-  /** like transform_in, but only 1d and updates (last lines) are reverse
-   *   strided_grid should be nonzero only on the local domain
-   *   -> find data dependencies
-   *   assumes that strided_grid spans the whole strided domain for level
-   */
-  using DElem = ddc::DiscreteElement<DDim>;
-  using SDDom = ddc::StridedDiscreteDomain<DDim>;
-  auto [even_domain_functor, odd_domain_functor] =
-      get_even_and_odd_half_domain_functors<DDim, DDim>();
-
-  ddc::DiscreteVector<DDim> current_level(level);
-  for (long int current_1d_level : one_d_level_range) {
-    assert(current_1d_level > 0);
-    current_level.template get<DDim>() = current_1d_level;
-    auto const operating_domain = strided_domain_from_level<DDim>(
-        ddc::detail::array(current_level), ddc::detail::array(maximum_level));
-    auto const current_stride = operating_domain.strides();
-    auto const virtual_length =
-        ddc::DiscreteVector<DDim>(operating_domain.extents() * current_stride);
-    auto const this_d_stride = ddc::DiscreteVector<DDim>(current_stride);
-
-    for (auto const &[offset, filter] :
-         lifting_offsets_and_coefficients | std::ranges::views::reverse) {
-      std::function<SDDom(SDDom const &)> coarsen_domain;
-      if (offset == 0) {
-        coarsen_domain = even_domain_functor;
-      } else if (offset == 1) {
-        coarsen_domain = odd_domain_functor;
-      } else {
-        throw std::runtime_error("Filter offset not supported");
-      }
-      auto const read_from_domain = coarsen_domain(operating_domain);
-      ddc::parallel_for_each(
-          instance, read_from_domain, KOKKOS_LAMBDA(DElem const ixyz) {
-            if (strided_grid(ixyz) == 0.0) {
-              return;
-            }
-            DElem lower_element = ixyz - this_d_stride;
-            DElem upper_element = ixyz + this_d_stride;
-            if ((offset == 1) &&
-                (ixyz + this_d_stride > read_from_domain.back())) {
-              upper_element -= virtual_length;
-            } else if ((offset == 0) && (ixyz <= operating_domain.front())) {
-              lower_element += virtual_length;
-            }
-            strided_grid(lower_element) +=
-                std::abs(filter[0]) * strided_grid(ixyz);
-            strided_grid(ixyz) += std::abs(filter[1]) * strided_grid(ixyz);
-            strided_grid(upper_element) +=
-                std::abs(filter[2]) * strided_grid(ixyz);
-          });
-    }
-  }
-}
-
-template <typename SelectedDim, typename SDDom, typename DDom>
-constexpr ddc::SparseDiscreteDomain<SelectedDim> get_required_transform_domain(
-    bool is_for_hierarchization, SDDom const &full_domain,
-    DDom const &local_domain, ddc::DiscreteVector<SelectedDim> const &level,
-    ddc::DiscreteVector<SelectedDim> const &minimum_level,
-    ddc::DiscreteVector<SelectedDim> const &maximum_level,
-    std::string const &wavelet_name = "hat") {
-  // dehierarchize a 1d pole, where all is initialized to 0 except for the
-  // local domain, to get all indices that will be required for hierarchization
-  using DElem = ddc::DiscreteElement<SelectedDim>;
-
-  // initialize full pole to zero
-  ddc::Chunk full_pole_chunk(
-      "full_pole_chunk", full_domain,
-      ddc::HostAllocator<float>()); // todo smaller data type
-  auto full_pole = full_pole_chunk.span_view();
-  ddc::parallel_for_each(
-      Kokkos::DefaultHostExecutionSpace(), full_domain,
-      KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 0.0; });
-  ddc::parallel_for_each(
-      Kokkos::DefaultHostExecutionSpace(), local_domain,
-      KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 1.0; });
-  auto increasing_range =
-      std::views::iota(static_cast<long int>(minimum_level + 1),
-                       static_cast<long int>(level) + 1);
-  auto decreasing_range = increasing_range | std::views::reverse;
-  if (is_for_hierarchization) {
-    transform_mask<SelectedDim>(
-        full_pole, level, maximum_level, increasing_range,
-        lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name));
-  } else {
-    transform_mask<SelectedDim>(
-        full_pole, level, maximum_level, decreasing_range,
-        lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name));
-  }
-  // set to 0.0 on local_domain
-  ddc::parallel_for_each(
-      Kokkos::DefaultHostExecutionSpace(), local_domain,
-      KOKKOS_LAMBDA(DElem const ixyz) { full_pole(ixyz) = 0.0; });
-
-  // extract remaining indices to domain
-  Kokkos::View<DElem *, Kokkos::SharedSpace> required_elements(
-      "required_elements", full_domain.size());
-  size_t insert_index = 0;
-  ddc::host_for_each(
-      full_domain, [&required_elements, &full_pole, &insert_index](DElem ixyz) {
-        if (full_pole(ixyz) != 0.0) {
-          required_elements(insert_index++) = ixyz;
-        }
-      });
-  Kokkos::resize(required_elements, insert_index);
-  return ddc::SparseDiscreteDomain<SelectedDim>(required_elements);
-}
-
-template <typename DDom, typename HeadTag, typename... DDims>
-constexpr ddc::SparseDiscreteDomain<HeadTag, DDims...>
-get_required_transform_domains_recursive(
-    bool is_for_hierarchization,
-    ddc::StridedDiscreteDomain<HeadTag, DDims...> const &full_domain,
-    DDom const &local_domain,
-    ddc::DiscreteVector<HeadTag, DDims...> const &level,
-    ddc::DiscreteVector<HeadTag, DDims...> const &minimum_level,
-    ddc::DiscreteVector<HeadTag, DDims...> const &maximum_level,
-    std::string const &wavelet_name = "hat") {
-  auto head_domain = get_required_transform_domain<HeadTag>(
-      is_for_hierarchization, ddc::select<HeadTag>(full_domain),
-      ddc::select<HeadTag>(local_domain), ddc::select<HeadTag>(level),
-      ddc::select<HeadTag>(minimum_level), ddc::select<HeadTag>(maximum_level),
-      wavelet_name);
-  if constexpr (sizeof...(DDims) == 0) {
-    return head_domain;
-  } else {
-    return ddc::SparseDiscreteDomain<HeadTag, DDims...>(
-        head_domain,
-        get_required_transform_domains_recursive(
-            is_for_hierarchization, ddc::select<DDims...>(full_domain),
-            ddc::select<DDims...>(local_domain), ddc::select<DDims...>(level),
-            ddc::select<DDims...>(minimum_level),
-            ddc::select<DDims...>(maximum_level), wavelet_name));
-  }
-}
-
-template <typename DDom, typename... DDims>
-constexpr ddc::SparseDiscreteDomain<DDims...> get_required_transform_domains(
-    bool is_for_hierarchization,
-    ddc::StridedDiscreteDomain<DDims...> const &full_domain,
-    DDom const &local_domain, ddc::DiscreteVector<DDims...> const &level,
-    ddc::DiscreteVector<DDims...> const &minimum_level,
-    ddc::DiscreteVector<DDims...> const &maximum_level,
-    std::string const &wavelet_name = "hat") {
-  return ddc::SparseDiscreteDomain<DDims...>(
-      get_required_transform_domains_recursive(
-          is_for_hierarchization, full_domain, local_domain, level,
-          minimum_level, maximum_level, wavelet_name));
-}
 } // namespace paliwa
