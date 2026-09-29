@@ -526,4 +526,79 @@ TEST(distributed, one_point_per_rank) {
   MPI_Comm_free(&cart);
 }
 
+// Exercise slice ordering independently of the transform: offset/strided
+// subdomains, each transformed axis, sparse receive storage and untouched gaps.
+template <typename Axis, typename Value> void test_bulk_ghost_slices() {
+  using X = paliwa::DDimX;
+  using Y = paliwa::DDimY;
+  using Z = paliwa::DDimZ;
+  using Element = ddc::DiscreteElement<X, Y, Z>;
+  using Vector = ddc::DiscreteVector<X, Y, Z>;
+  using AxisElement = ddc::DiscreteElement<Axis>;
+  int rank, ranks;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &ranks);
+  if (ranks < 2)
+    GTEST_SKIP() << "Need at least 2 ranks";
+  ddc::StridedDiscreteDomain<X, Y, Z> storage(Element(10, 20, 30),
+                                              Vector(7, 6, 5), Vector(2, 3, 4));
+  ddc::StridedDiscreteDomain<X, Y, Z> selected(
+      Element(12, 23, 34), Vector(3, 2, 2), Vector(4, 6, 8));
+  ddc::Chunk source("slice_source", storage, ddc::HostAllocator<Value>());
+  auto src = source.span_view();
+  auto value = [](int owner, Element e) {
+    double const v =
+        static_cast<double>(owner * 100000 + e.template uid<X>() * 1000 +
+                            e.template uid<Y>() * 10 + e.template uid<Z>());
+    if constexpr (std::is_same_v<Value, Kokkos::complex<double>>)
+      return Value(v, -v - 0.5);
+    else
+      return Value(v);
+  };
+  ddc::host_for_each(storage, [&](Element e) { src(e) = value(rank, e); });
+  auto const axis = ddc::select<Axis>(storage);
+  Kokkos::View<AxisElement *, Kokkos::SharedSpace> indices("slice_indices", 3);
+  indices(0) = axis.front();
+  indices(1) = axis.front() + axis.strides(); // Not communicated.
+  indices(2) = axis.back();
+  ddc::SparseDiscreteDomain<Axis> receive_axis(indices);
+  auto receive_dimension = [&]<typename Dim>() {
+    if constexpr (std::is_same_v<Dim, Axis>)
+      return receive_axis;
+    else
+      return paliwa::sparse_from_strided_domain(ddc::select<Dim>(selected));
+  };
+  ddc::SparseDiscreteDomain<X, Y, Z> receive_domain(
+      receive_dimension.template operator()<X>(),
+      receive_dimension.template operator()<Y>(),
+      receive_dimension.template operator()<Z>());
+  ddc::Chunk destination("slice_destination", receive_domain,
+                         ddc::HostAllocator<Value>());
+  auto dst = destination.span_view();
+  ddc::host_for_each(receive_domain, [&](Element e) { dst(e) = Value(-1); });
+  int const previous = (rank + ranks - 1) % ranks;
+  int const next = (rank + 1) % ranks;
+  using Peer = paliwa::detail::PeerExchange<AxisElement>;
+  // Separate receive-only/send-only entries also exercise empty directions.
+  std::vector<Peer> peers{{previous, {axis.front(), axis.back()}, {}},
+                          {next, {}, {axis.front(), axis.back()}}};
+  paliwa::detail::exchange_ghost_slices<Axis>(peers, src, dst, selected,
+                                              MPI_COMM_WORLD);
+  ddc::host_for_each(receive_domain, [&](Element e) {
+    auto const x = ddc::select<Axis>(e);
+    EXPECT_EQ(dst(e), x == indices(1) ? Value(-1) : value(previous, e));
+  });
+  ddc::host_for_each(storage,
+                     [&](Element e) { EXPECT_EQ(src(e), value(rank, e)); });
+}
+
+TEST(distributed, bulk_ghost_slices) {
+  test_bulk_ghost_slices<paliwa::DDimX, double>();
+  test_bulk_ghost_slices<paliwa::DDimY, double>();
+  test_bulk_ghost_slices<paliwa::DDimZ, double>();
+  test_bulk_ghost_slices<paliwa::DDimX, Kokkos::complex<double>>();
+  test_bulk_ghost_slices<paliwa::DDimY, Kokkos::complex<double>>();
+  test_bulk_ghost_slices<paliwa::DDimZ, Kokkos::complex<double>>();
+}
+
 #endif // PALIWA_WITH_MPI
