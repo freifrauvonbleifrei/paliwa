@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 #include <complex>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -352,4 +353,77 @@ TEST(transform_plan, remote_only_complex_poles) {
   };
   check.template operator()<PlanDim>();
   check.template operator()<PoleDim>();
+}
+
+TEST(transform_plan, packed_pass_exact_accesses) {
+  EXPECT_TRUE(paliwa::pole_pass_segments({}, 0, 3, 5, 2).empty());
+  // Compare ordered (destination, lower, upper) slot triples against global
+  // periodic indexing for every origin, parity, and interval on small grids.
+  for (long level = 1; level <= 6; ++level) {
+    long const period = 1L << level;
+    long const spacing = 4;
+    for (long pass = 1; pass <= level; ++pass) {
+      long const distance = 1L << (level - pass);
+      for (long origin = 0; origin < period; ++origin) {
+        for (long parity : {0L, 1L}) {
+          for (long start = parity * distance; start < period;
+               start += 2 * distance) {
+            for (long count = 1; count <= period / (2 * distance); ++count) {
+              long const last = (start + (count - 1) * 2 * distance) % period;
+              auto parts = paliwa::pole_pass_segments(
+                  {start * spacing, last * spacing}, origin * spacing, level,
+                  level + 2, pass);
+              std::vector<std::array<int, 3>> actual, expected;
+              for (auto const &part : parts) {
+                for (decltype(part.count) i = 0; i < part.count; ++i) {
+                  auto const offset = i * part.stride;
+                  actual.push_back({part.first + offset, part.lower + offset,
+                                    part.upper + offset});
+                }
+              }
+              auto slot = [&](long x) {
+                return static_cast<int>((x - origin + 2 * period) % period);
+              };
+              for (long i = 0; i < count; ++i) {
+                long const x = (start + i * 2 * distance) % period;
+                expected.push_back(
+                    {slot(x), slot(x - distance), slot(x + distance)});
+              }
+              ASSERT_EQ(actual, expected)
+                  << level << ':' << pass << ':' << origin << ':' << start
+                  << ':' << count;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(transform_plan, packed_pass_large_coordinates) {
+  // Large DDC coordinates must not be narrowed to int, nor overflow
+  // when translating an interval across its packed origin.
+  using Index = ddc::DiscreteElementType;
+  using Difference = ddc::DiscreteVectorElement;
+  constexpr int maximum = std::numeric_limits<Difference>::digits;
+  auto const spacing = Index{1} << (maximum - 3);
+  auto parts = paliwa::pole_pass_segments(
+      {static_cast<Difference>(spacing), static_cast<Difference>(5 * spacing)},
+      6 * spacing, 3, maximum, 3);
+  std::vector<std::array<int, 3>> actual;
+  for (auto const &part : parts)
+    for (int i = 0; i < part.count; ++i) {
+      auto const offset = i * part.stride;
+      actual.push_back(
+          {part.first + offset, part.lower + offset, part.upper + offset});
+    }
+  EXPECT_EQ(actual,
+            (std::vector<std::array<int, 3>>{{3, 2, 4}, {5, 4, 6}, {7, 6, 0}}));
+}
+
+TEST(transform_plan, packed_pass_index_range) {
+  EXPECT_THROW(paliwa::pole_pass_segments({0, 0}, 0,
+                                          std::numeric_limits<int>::digits,
+                                          std::numeric_limits<int>::digits, 1),
+               std::invalid_argument);
 }

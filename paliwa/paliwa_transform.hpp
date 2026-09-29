@@ -56,7 +56,7 @@ void transform_packed_poles(
     Chunk grid, RemoteChunk remote_grid,
     ddc::StridedDiscreteDomain<Dims...> const &outputs,
     std::vector<long> const &levels, long level, long maximum_level,
-    std::vector<std::pair<int, std::array<double, 3>>> const &filters,
+    std::vector<std::pair<int, std::array<double, 3>>> const &lifting_passes,
     std::vector<std::vector<PeriodicBounds>> const &writes,
     std::vector<long> const &inputs, PoleExecution order, ExecSpace instance) {
   using Value = std::remove_cv_t<typename Chunk::element_type>;
@@ -91,14 +91,30 @@ void transform_packed_poles(
             x + stride == period ? 0 : x + stride);
     }
   };
-  auto apply = [&](int buffer, size_t l, size_t p) {
-    auto const &f = filters[p].second;
-    visit_writes(l, p, [&](long x, long lower, long upper) {
-      buffers(buffer, slot(x)) =
-          static_cast<Value>(f[0]) * buffers(buffer, slot(lower)) +
-          static_cast<Value>(f[1]) * buffers(buffer, slot(x)) +
-          static_cast<Value>(f[2]) * buffers(buffer, slot(upper));
-    });
+  // Translate each pass once. The period is the full grid period in pole
+  // slots, not the length of the potentially shorter interval allocation.
+  std::vector<std::vector<PolePassSegment>> packed_indices;
+  packed_indices.reserve(levels.size() * lifting_passes.size());
+  for (size_t l = 0; l < levels.size(); ++l)
+    for (size_t p = 0; p < lifting_passes.size(); ++p)
+      packed_indices.push_back(pole_pass_segments(
+          writes[l][p], cover.min, level, maximum_level, levels[l]));
+  auto apply_pass = [&](int buffer, size_t l, size_t p) {
+    auto const &coefficients = lifting_passes[p].second;
+    for (auto const &segment : packed_indices[l * lifting_passes.size() + p]) {
+      auto x = segment.first;
+      auto lower = segment.lower;
+      auto upper = segment.upper;
+      for (auto remaining = segment.count; remaining > 0; --remaining) {
+        buffers(buffer, x) =
+            static_cast<Value>(coefficients[0]) * buffers(buffer, lower) +
+            static_cast<Value>(coefficients[1]) * buffers(buffer, x) +
+            static_cast<Value>(coefficients[2]) * buffers(buffer, upper);
+        x += segment.stride;
+        lower += segment.stride;
+        upper += segment.stride;
+      }
+    }
   };
   if (order == PoleExecution::PackedPoles) {
     // Resolve coordinate-to-storage mappings once per axis, not per value of
@@ -159,8 +175,8 @@ void transform_packed_poles(
       gather_local(pole, buffer, false);
       gather_remote(pole, buffer, false);
       for (size_t l = 0; l < levels.size(); ++l)
-        for (size_t p = 0; p < filters.size(); ++p)
-          apply(buffer, l, p);
+        for (size_t p = 0; p < lifting_passes.size(); ++p)
+          apply_pass(buffer, l, p);
       scatter_local(pole, buffer, true);
       tokens.release(buffer);
     });
@@ -168,7 +184,7 @@ void transform_packed_poles(
     instance.fence();
   } else {
     for (size_t l = 0; l < levels.size(); ++l) {
-      for (size_t p = 0; p < filters.size(); ++p) {
+      for (size_t p = 0; p < lifting_passes.size(); ++p) {
         if (writes[l][p].empty())
           continue;
         ddc::parallel_for_each(instance, poles, [&](auto pole) {
@@ -178,7 +194,7 @@ void transform_packed_poles(
               buffers(buffer, slot(input)) =
                   grid(Element(pole, ddc::DiscreteElement<Dim>(input)));
           });
-          apply(buffer, l, p);
+          apply_pass(buffer, l, p);
           visit_writes(l, p, [&](long x, long, long) {
             grid(Element(pole, ddc::DiscreteElement<Dim>(x))) =
                 buffers(buffer, slot(x));
