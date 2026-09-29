@@ -156,7 +156,8 @@ void test_classify_ghost_by_rank() {
 
 TEST(distributed, classify_ghost_by_rank) { test_classify_ghost_by_rank(); }
 
-void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
+void test_distributed_roundtrip_1d(std::string const &wavelet_name,
+                                   paliwa::PoleExecution order) {
   using Dim = paliwa::DDimX;
 
   int world_size, world_rank;
@@ -243,7 +244,8 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
 
   paliwa::distributed_hierarchize(
       local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
-      cart_comm, Kokkos::DefaultHostExecutionSpace());
+      cart_comm, Kokkos::DefaultHostExecutionSpace(), std::array<int, 1>{0},
+      order);
 
   // Compare with serial
   {
@@ -276,7 +278,8 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
 
   paliwa::distributed_dehierarchize(
       local_span, full_strided, level_v, min_level_v, max_level_v, wavelet_name,
-      cart_comm, Kokkos::DefaultHostExecutionSpace());
+      cart_comm, Kokkos::DefaultHostExecutionSpace(), std::array<int, 1>{0},
+      order);
 
   ddc::host_for_each(local_strided, [&](ddc::DiscreteElement<Dim> e) {
     EXPECT_NEAR(local_span(e), orig_span(e), 1e-10);
@@ -286,9 +289,24 @@ void test_distributed_roundtrip_1d(std::string const &wavelet_name) {
   MPI_Comm_free(&sub_comm);
 }
 
-void roundtrip_1d_hat() { test_distributed_roundtrip_1d("hat"); }
-void roundtrip_1d_bio() { test_distributed_roundtrip_1d("biorthogonal"); }
-void roundtrip_1d_fw() { test_distributed_roundtrip_1d("fullweighting"); }
+void roundtrip_1d_hat() {
+  for (auto order :
+       {paliwa::PoleExecution::Direct, paliwa::PoleExecution::PackedPasses,
+        paliwa::PoleExecution::PackedPoles})
+    test_distributed_roundtrip_1d("hat", order);
+}
+void roundtrip_1d_bio() {
+  for (auto order :
+       {paliwa::PoleExecution::Direct, paliwa::PoleExecution::PackedPasses,
+        paliwa::PoleExecution::PackedPoles})
+    test_distributed_roundtrip_1d("biorthogonal", order);
+}
+void roundtrip_1d_fw() {
+  for (auto order :
+       {paliwa::PoleExecution::Direct, paliwa::PoleExecution::PackedPasses,
+        paliwa::PoleExecution::PackedPoles})
+    test_distributed_roundtrip_1d("fullweighting", order);
+}
 TEST(distributed, roundtrip_1d_hat) { roundtrip_1d_hat(); }
 TEST(distributed, roundtrip_1d_biorthogonal) { roundtrip_1d_bio(); }
 TEST(distributed, roundtrip_1d_fullweighting) { roundtrip_1d_fw(); }
@@ -410,26 +428,45 @@ void distributed_roundtrip_2d_all_wavelets() {
 
   for (auto const &wn : {"hat", "biorthogonal", "fullweighting"}) {
     SCOPED_TRACE(wn);
-    ddc::Chunk lc("local", local_strided, ddc::HostAllocator<double>());
-    auto ls = lc.span_view();
-    ddc::Chunk oc("orig", local_strided, ddc::HostAllocator<double>());
-    auto os = oc.span_view();
-
-    ddc::host_for_each(local_strided, [&](DElem e) {
+    ddc::Chunk reference_chunk("reference", full_strided,
+                               ddc::HostAllocator<double>());
+    auto reference = reference_chunk.span_view();
+    ddc::host_for_each(full_strided, [&](DElem e) {
       auto c = ddc::coordinate(e).array();
-      ls(e) = std::sin(2.0 * pi_dist * c[0]) * std::sin(2.0 * pi_dist * c[1]);
-      os(e) = ls(e);
+      reference(e) =
+          std::sin(2.0 * pi_dist * c[0]) * std::sin(2.0 * pi_dist * c[1]);
     });
+    paliwa::hierarchize(reference, level_v, min_level_v, max_level_v,
+                        std::string(wn), Kokkos::DefaultHostExecutionSpace());
+    for (auto order :
+         {paliwa::PoleExecution::Direct, paliwa::PoleExecution::PackedPasses,
+          paliwa::PoleExecution::PackedPoles}) {
+      ddc::Chunk lc("local", local_strided, ddc::HostAllocator<double>());
+      auto ls = lc.span_view();
+      ddc::Chunk oc("orig", local_strided, ddc::HostAllocator<double>());
+      auto os = oc.span_view();
 
-    paliwa::distributed_hierarchize(ls, full_strided, level_v, min_level_v,
-                                    max_level_v, std::string(wn), cart_comm,
-                                    Kokkos::DefaultHostExecutionSpace());
-    paliwa::distributed_dehierarchize(ls, full_strided, level_v, min_level_v,
+      ddc::host_for_each(local_strided, [&](DElem e) {
+        auto c = ddc::coordinate(e).array();
+        ls(e) = std::sin(2.0 * pi_dist * c[0]) * std::sin(2.0 * pi_dist * c[1]);
+        os(e) = ls(e);
+      });
+
+      paliwa::distributed_hierarchize(ls, full_strided, level_v, min_level_v,
                                       max_level_v, std::string(wn), cart_comm,
-                                      Kokkos::DefaultHostExecutionSpace());
+                                      Kokkos::DefaultHostExecutionSpace(),
+                                      std::array<int, 2>{0, 1}, order);
+      ddc::host_for_each(local_strided, [&](DElem e) {
+        EXPECT_NEAR(ls(e), reference(e), 1e-10);
+      });
+      paliwa::distributed_dehierarchize(ls, full_strided, level_v, min_level_v,
+                                        max_level_v, std::string(wn), cart_comm,
+                                        Kokkos::DefaultHostExecutionSpace(),
+                                        std::array<int, 2>{0, 1}, order);
 
-    ddc::host_for_each(local_strided,
-                       [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
+      ddc::host_for_each(local_strided,
+                         [&](DElem e) { EXPECT_NEAR(ls(e), os(e), 1e-10); });
+    }
   }
 
   MPI_Comm_free(&cart_comm);
@@ -465,20 +502,26 @@ TEST(distributed, one_point_per_rank) {
   auto reference = reference_chunk.span_view();
   for (const auto &wavelet : {"hat", "biorthogonal", "fullweighting"}) {
     SCOPED_TRACE(wavelet);
-    ddc::host_for_each(full, [&](Element e) {
-      const auto i = e.uid<Dim>();
-      reference(e) = 1.0 + static_cast<double>(i * i);
-    });
-    const double original = reference(Element(rank));
-    span(Element(rank)) = original;
-    paliwa::hierarchize(reference, level, minimum, level, wavelet,
-                        Kokkos::DefaultHostExecutionSpace());
-    paliwa::distributed_hierarchize(span, full, level, minimum, level, wavelet,
-                                    cart);
-    EXPECT_NEAR(span(Element(rank)), reference(Element(rank)), 1e-12);
-    paliwa::distributed_dehierarchize(span, full, level, minimum, level,
-                                      wavelet, cart);
-    EXPECT_NEAR(span(Element(rank)), original, 1e-12);
+    for (auto order :
+         {paliwa::PoleExecution::Direct, paliwa::PoleExecution::PackedPasses,
+          paliwa::PoleExecution::PackedPoles}) {
+      ddc::host_for_each(full, [&](Element e) {
+        const auto i = e.uid<Dim>();
+        reference(e) = 1.0 + static_cast<double>(i * i);
+      });
+      const double original = reference(Element(rank));
+      span(Element(rank)) = original;
+      paliwa::hierarchize(reference, level, minimum, level, wavelet,
+                          Kokkos::DefaultHostExecutionSpace());
+      paliwa::distributed_hierarchize(
+          span, full, level, minimum, level, wavelet, cart,
+          Kokkos::DefaultHostExecutionSpace(), std::array<int, 1>{0}, order);
+      EXPECT_NEAR(span(Element(rank)), reference(Element(rank)), 1e-12);
+      paliwa::distributed_dehierarchize(
+          span, full, level, minimum, level, wavelet, cart,
+          Kokkos::DefaultHostExecutionSpace(), std::array<int, 1>{0}, order);
+      EXPECT_NEAR(span(Element(rank)), original, 1e-12);
+    }
   }
   MPI_Comm_free(&cart);
 }

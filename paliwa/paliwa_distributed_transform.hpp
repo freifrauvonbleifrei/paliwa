@@ -126,11 +126,11 @@ compute_peer_exchanges(
  *
  * For each peer, builds hindexed MPI types that describe the memory
  * locations of ghost elements directly in the source/destination spans.
- * One MPI_Sendrecv per peer, no intermediate buffers.
+ * Nonblocking sends and receives, followed by a wait before transforming.
  *
  * @param peers Peer exchange info (indices each side needs)
  * @param local_grid Source data (send from here)
- * @param extended_span Destination data (receive into here)
+ * @param receive_grid Destination data (receive into here)
  * @param local_restricted Local multi-D strided domain (for iterating slices)
  * @param local_restricted_1d Local 1D strided domain along transform dim
  * @param cart_comm Cartesian communicator
@@ -140,7 +140,7 @@ template <typename DimToTransform, typename SrcSpanType, typename DstSpanType,
 void exchange_ghost_slices(
     std::vector<PeerExchange<ddc::DiscreteElement<DimToTransform>>> const
         &peers,
-    SrcSpanType const local_grid, DstSpanType const extended_span,
+    SrcSpanType const local_grid, DstSpanType const receive_grid,
     ddc::StridedDiscreteDomain<DDims...> const &local_restricted,
     ddc::StridedDiscreteDomain<DimToTransform> const &local_restricted_1d,
     MPI_Comm cart_comm) {
@@ -189,7 +189,7 @@ void exchange_ghost_slices(
   for (auto &peer : peers) {
     // Receive type
     auto recv_displacements =
-        build_displacements(extended_span, peer.indices_we_need);
+        build_displacements(receive_grid, peer.indices_we_need);
     int recv_count = static_cast<int>(recv_displacements.size());
     std::vector<int> recv_blocklens(recv_count, 1);
     MPI_Datatype recv_type;
@@ -200,7 +200,7 @@ void exchange_ghost_slices(
     types_to_free.push_back(recv_type);
 
     MPI_Request req;
-    MPI_Irecv(extended_span.data_handle(), 1, recv_type, peer.remote_rank, 20,
+    MPI_Irecv(receive_grid.data_handle(), 1, recv_type, peer.remote_rank, 20,
               cart_comm, &req);
     requests.push_back(req);
   }
@@ -236,9 +236,8 @@ void exchange_ghost_slices(
 /**
  * @brief Core distributed transform for a single dimension.
  *
- * Allocates a single multi-D chunk that is sparse along DimToTransform
- * (local ∪ ghost indices) and covers the local strided domain in all
- * other dimensions. The transform runs once on the full multi-D extended chunk.
+ * Packed poles gather directly from local storage and a remote-only sparse
+ * buffer. Direct and pass-wise execution retain a combined local/ghost buffer.
  */
 template <typename DimToTransform, bool IsHierarchization,
           typename ChunkSpanType, typename ExecSpace, typename... DDims>
@@ -249,7 +248,7 @@ bool distributed_transform_in(
     ddc::DiscreteVector<DDims...> const &minimum_level,
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm, int dim_index,
-    ExecSpace instance) {
+    ExecSpace instance, PoleExecution pole_execution) {
   using value_type = typename ChunkSpanType::element_type;
   using DElem1d = ddc::DiscreteElement<DimToTransform>;
 
@@ -286,17 +285,17 @@ bool distributed_transform_in(
   auto const increasing = std::views::iota(
       static_cast<long>(ddc::select<DimToTransform>(minimum_level)) + 1,
       static_cast<long>(ddc::select<DimToTransform>(level)) + 1);
-  auto transform = [&](auto grid) {
+  auto transform = [&](auto grid, auto remote) {
     if constexpr (IsHierarchization) {
-      transform_in<DimToTransform>(
-          grid, level, maximum_level, increasing | std::views::reverse,
+      transform_with_remote<DimToTransform>(
+          grid, remote, level, maximum_level, increasing | std::views::reverse,
           lifting_wavelet_filter_offsets_and_coefficients.at(wavelet_name),
-          local_restricted, instance);
+          local_restricted, instance, pole_execution);
     } else {
-      transform_in<DimToTransform>(
-          grid, level, maximum_level, increasing,
+      transform_with_remote<DimToTransform>(
+          grid, remote, level, maximum_level, increasing,
           lifting_wavelet_reconstruct_offsets_and_coefficients.at(wavelet_name),
-          local_restricted, instance);
+          local_restricted, instance, pole_execution);
     }
     instance.fence();
   };
@@ -305,15 +304,39 @@ bool distributed_transform_in(
   // still need our local coefficients (e.g. the coarse point of a tiny slab).
   // Even without peers, restrict writes to the local poles in other dimensions.
   if (peers.empty()) {
-    transform(local_grid);
+    transform(local_grid, local_grid);
     return true;
+  }
+
+  if constexpr (Kokkos::SpaceAccessibility<ExecSpace,
+                                           Kokkos::HostSpace>::accessible) {
+    if (pole_execution == PoleExecution::PackedPoles) {
+      // Only received values need sparse storage. Local values stay in the
+      // strided grid and are gathered/scattered directly by each packed pole.
+      ddc::SparseDiscreteDomain<DDims...> remote_domain(
+          [&]() -> ddc::SparseDiscreteDomain<DDims> {
+            if constexpr (std::is_same_v<DDims, DimToTransform>)
+              return ghost_domain_1d;
+            else
+              return sparse_from_strided_domain(
+                  ddc::select<DDims>(local_restricted));
+          }()...);
+      ddc::Chunk remote_chunk("remote_buffer", remote_domain,
+                              ddc::HostAllocator<value_type>());
+      auto const remote = remote_chunk.span_view();
+      exchange_ghost_slices<DimToTransform>(peers, local_grid, remote,
+                                            local_restricted,
+                                            local_restricted_1d, cart_comm);
+      transform(local_grid, remote);
+      return true;
+    }
   }
 
   // Extended 1D domain: local ∪ ghost
   auto extended_1d = union_of_sparse_domains(
       sparse_from_strided_domain(local_restricted_1d), ghost_domain_1d);
 
-  // Multi-D extended domain: sparse along DimToTransform, strided elsewhere
+  // Combined sparse domain, with local strided coordinates on other axes
   ddc::SparseDiscreteDomain<DDims...> extended_domain(
       [&]() -> ddc::SparseDiscreteDomain<DDims> {
         if constexpr (std::is_same_v<DDims, DimToTransform>) {
@@ -340,7 +363,7 @@ bool distributed_transform_in(
                                         local_restricted, local_restricted_1d,
                                         cart_comm);
 
-  transform(extended_span);
+  transform(extended_span, extended_span);
 
   // Copy local results back
   ddc::host_for_each(local_restricted,
@@ -361,11 +384,12 @@ void distributed_hierarchize_impl(
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm, ExecSpace instance,
     std::array<int, sizeof...(DDims)> const &cartesian_axes,
-    std::index_sequence<Is...>) {
+    std::index_sequence<Is...>, PoleExecution pole_execution) {
   [[maybe_unused]] bool unused =
       (distributed_transform_in<DDims, true>(
            local_grid, full_strided_domain, level, minimum_level, maximum_level,
-           wavelet_name, cart_comm, cartesian_axes[Is], instance) &&
+           wavelet_name, cart_comm, cartesian_axes[Is], instance,
+           pole_execution) &&
        ...);
 }
 
@@ -379,11 +403,12 @@ void distributed_dehierarchize_impl(
     ddc::DiscreteVector<DDims...> const &maximum_level,
     std::string const &wavelet_name, MPI_Comm cart_comm, ExecSpace instance,
     std::array<int, sizeof...(DDims)> const &cartesian_axes,
-    std::index_sequence<Is...>) {
+    std::index_sequence<Is...>, PoleExecution pole_execution) {
   [[maybe_unused]] bool unused =
       (distributed_transform_in<DDims, false>(
            local_grid, full_strided_domain, level, minimum_level, maximum_level,
-           wavelet_name, cart_comm, cartesian_axes[Is], instance) &&
+           wavelet_name, cart_comm, cartesian_axes[Is], instance,
+           pole_execution) &&
        ...);
 }
 
@@ -393,11 +418,13 @@ void distributed_dehierarchize_impl(
  * @brief Distributed hierarchization across all dimensions.
  * @param cartesian_axes Permutation mapping each domain dimension to an axis
  * of cart_comm. Defaults to the domain dimension order.
+ * @param pole_execution Optional CPU pole packing and loop order; devices use
+ * direct execution. Defaults to packed poles on the CPU.
  *
  * Processes each dimension sequentially, exchanging ghost data before each
  * dimension's transform (since previous dimensions modify the data).
- * Per dimension, allocates a single multi-D chunk (sparse along the
- * transform dimension, strided along others) and runs the transform once.
+ * Packed poles use a sparse receive buffer containing only remote values;
+ * local values stay in their original strided storage.
  */
 template <typename ChunkSpanType,
           typename ExecSpace = Kokkos::DefaultHostExecutionSpace,
@@ -411,17 +438,20 @@ void distributed_hierarchize(
     std::string const &wavelet_name, MPI_Comm cart_comm,
     ExecSpace instance = ExecSpace(),
     std::array<int, sizeof...(DDims)> const &cartesian_axes =
-        detail::identity_cartesian_axes<sizeof...(DDims)>()) {
+        detail::identity_cartesian_axes<sizeof...(DDims)>(),
+    PoleExecution pole_execution = PoleExecution::PackedPoles) {
   detail::distributed_hierarchize_impl(
       local_grid, full_strided_domain, level, minimum_level, maximum_level,
       wavelet_name, cart_comm, instance, cartesian_axes,
-      std::index_sequence_for<DDims...>{});
+      std::index_sequence_for<DDims...>{}, pole_execution);
 }
 
 /**
  * @brief Distributed dehierarchization across all dimensions.
  * @param cartesian_axes Permutation mapping each domain dimension to an axis
  * of cart_comm. Defaults to the domain dimension order.
+ * @param pole_execution Optional CPU pole packing and loop order; devices use
+ * direct execution. Defaults to packed poles on the CPU.
  */
 template <typename ChunkSpanType,
           typename ExecSpace = Kokkos::DefaultHostExecutionSpace,
@@ -435,11 +465,12 @@ void distributed_dehierarchize(
     std::string const &wavelet_name, MPI_Comm cart_comm,
     ExecSpace instance = ExecSpace(),
     std::array<int, sizeof...(DDims)> const &cartesian_axes =
-        detail::identity_cartesian_axes<sizeof...(DDims)>()) {
+        detail::identity_cartesian_axes<sizeof...(DDims)>(),
+    PoleExecution pole_execution = PoleExecution::PackedPoles) {
   detail::distributed_dehierarchize_impl(
       local_grid, full_strided_domain, level, minimum_level, maximum_level,
       wavelet_name, cart_comm, instance, cartesian_axes,
-      std::index_sequence_for<DDims...>{});
+      std::index_sequence_for<DDims...>{}, pole_execution);
 }
 
 #endif // PALIWA_WITH_MPI

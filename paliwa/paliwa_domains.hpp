@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <ddc/ddc.hpp>
+#include <limits>
 #include <map>
 #include <ranges>
 #include <stdexcept>
@@ -464,6 +465,73 @@ auto domain_from_transform_bounds(std::vector<PeriodicBounds> const &bounds,
   if (count > 1)
     std::sort(elements.data(), elements.data() + count);
   return ddc::SparseDiscreteDomain<Dim>(elements);
+}
+
+// Smallest circular interval containing sorted, distinct indices
+inline PeriodicBounds covering_periodic_bounds(std::vector<long> const &indices,
+                                               long period) {
+  if (indices.empty())
+    return {};
+  PeriodicBounds result{indices.front(), indices.back()};
+  long largest_gap = indices.front() + period - indices.back();
+  for (size_t i = 1; i < indices.size(); ++i) {
+    long const gap = indices[i] - indices[i - 1];
+    if (gap > largest_gap) {
+      largest_gap = gap;
+      result = {indices[i], indices[i - 1]};
+    }
+  }
+  return result;
+}
+
+// One affine piece of a lifting pass in packed-pole coordinates. Splitting
+// at the periodic edges keeps wrap checks out of the per-point loop.
+struct PolePassSegment {
+  int first, count, stride;
+  int lower, upper;
+};
+
+inline std::vector<PolePassSegment>
+pole_pass_segments(PeriodicBounds writes, ddc::DiscreteElementType origin,
+                   int level, int maximum_level, int pass_level) {
+  using Coordinate = ddc::DiscreteElementType;
+  std::vector<PolePassSegment> result;
+  if (writes.empty())
+    return result;
+  if (level < 1 || level >= std::numeric_limits<int>::digits ||
+      maximum_level < level ||
+      maximum_level >= std::numeric_limits<Coordinate>::digits ||
+      pass_level < 1 || pass_level > level)
+    throw std::invalid_argument("Invalid levels for packed-pole indexing");
+  auto const period = 1 << level;
+  auto const distance = 1 << (level - pass_level);
+  auto const step = 2 * distance;
+  auto const spacing_log2 = maximum_level - level;
+  auto const global_period = Coordinate{1} << maximum_level;
+  // Keep global coordinates wide; only packed-pole indices need to fit int.
+  auto const first = static_cast<Coordinate>(writes.min);
+  auto const last = static_cast<Coordinate>(writes.max);
+  auto const span =
+      last >= first ? last - first : global_period - (first - last);
+  auto remaining = static_cast<int>(span >> spacing_log2) / step + 1;
+  auto x = static_cast<int>(
+      (first >= origin ? first - origin : global_period - (origin - first)) >>
+      spacing_log2);
+  while (remaining > 0) {
+    auto const lower = x < distance ? period - (distance - x) : x - distance;
+    auto const upper =
+        x >= period - distance ? x - (period - distance) : x + distance;
+    auto const end =
+        x < distance
+            ? distance - 1
+            : (x < period - distance ? period - distance - 1 : period - 1);
+    auto const count = std::min(remaining, (end - x) / step + 1);
+    result.push_back({x, count, step, lower, upper});
+    remaining -= count;
+    auto const advance = count * step;
+    x = advance >= period - x ? advance - (period - x) : x + advance;
+  }
+  return result;
 }
 
 // Intersect one axis of a strided domain with a periodic interval. A wrapped
