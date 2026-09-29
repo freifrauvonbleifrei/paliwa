@@ -211,8 +211,11 @@ void exchange_ghost_slices(
       displacements.push_back(
           byte_offset(span, replace_dim(local_restricted.front(), index)));
     MPI_Datatype type;
-    MPI_Type_create_hindexed_block(static_cast<int>(indices.size()), 1,
-                                   displacements.data(), slice, &type);
+    // MUST 1.11.2 does not track MPI_Type_create_hindexed_block.
+    std::vector<int> const block_lengths(indices.size(), 1);
+    MPI_Type_create_hindexed(static_cast<int>(indices.size()),
+                             block_lengths.data(), displacements.data(), slice,
+                             &type);
     MPI_Type_commit(&type);
     types_to_free.push_back(type);
     return type;
