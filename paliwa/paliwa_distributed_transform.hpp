@@ -124,15 +124,15 @@ compute_peer_exchanges(
 /**
  * @brief Exchange ghost hyperplane slices via MPI derived datatypes.
  *
- * For each peer, builds hindexed MPI types that describe the memory
- * locations of ghost elements directly in the source/destination spans.
+ * Describe each regular (d-1)-D slice with nested vector types, then
+ * select the requested slices with one displacement per axis index.
+ * Source and destination may have different memory strides.
  * Nonblocking sends and receives, followed by a wait before transforming.
  *
  * @param peers Peer exchange info (indices each side needs)
  * @param local_grid Source data (send from here)
  * @param receive_grid Destination data (receive into here)
  * @param local_restricted Local multi-D strided domain (for iterating slices)
- * @param local_restricted_1d Local 1D strided domain along transform dim
  * @param cart_comm Cartesian communicator
  */
 template <typename DimToTransform, typename SrcSpanType, typename DstSpanType,
@@ -142,7 +142,6 @@ void exchange_ghost_slices(
         &peers,
     SrcSpanType const local_grid, DstSpanType const receive_grid,
     ddc::StridedDiscreteDomain<DDims...> const &local_restricted,
-    ddc::StridedDiscreteDomain<DimToTransform> const &local_restricted_1d,
     MPI_Comm cart_comm) {
   using value_type = typename SrcSpanType::element_type;
   using DElem1d = ddc::DiscreteElement<DimToTransform>;
@@ -155,49 +154,76 @@ void exchange_ghost_slices(
         static_cast<std::ptrdiff_t>(sizeof(value_type)));
   };
 
-  // Collect "pole bases": one representative element per (d-1)-D slice
-  auto first_local_1d_elem = local_restricted_1d.front();
-  std::vector<ddc::DiscreteElement<DDims...>> pole_bases;
-  ddc::host_for_each(
-      local_restricted, [&](ddc::DiscreteElement<DDims...> elem) {
-        if (ddc::select<DimToTransform>(elem) == first_local_1d_elem) {
-          pole_bases.push_back(elem);
-        }
-      });
-
-  // Build displacements for a set of 1D indices × all pole bases
-  auto build_displacements = [&](auto const &span,
-                                 std::vector<DElem1d> const &indices_1d) {
-    std::vector<MPI_Aint> displacements;
-    displacements.reserve(indices_1d.size() * pole_bases.size());
-    for (auto &d_elem : indices_1d) {
-      for (auto &pole_base : pole_bases) {
-        displacements.push_back(byte_offset(
-            span, paliwa::replace_dim<DimToTransform>(pole_base, d_elem)));
+  // The non-transformed axes are regular in both the local strided span
+  // and the sparse receive span (which stores those same axes densely).
+  // Use actual memory strides so the two layouts need not match.
+  auto build_slice = [&](auto const &span, DElem1d first) {
+    auto const anchor = replace_dim(local_restricted.front(), first);
+    auto axis_stride = [&]<typename Dim>() -> MPI_Aint {
+      if constexpr (std::is_same_v<Dim, DimToTransform>) {
+        return 0;
+      } else {
+        auto const axis = ddc::select<Dim>(local_restricted);
+        if (axis.size() < 2)
+          return 0;
+        auto const next = axis.front() + axis.strides();
+        return byte_offset(span, replace_dim(anchor, next)) -
+               byte_offset(span, anchor);
       }
+    };
+    std::array<MPI_Aint, sizeof...(DDims)> const strides {
+      axis_stride.template operator()<DDims>()...
+    };
+    std::array<int, sizeof...(DDims)> const counts{
+        (std::is_same_v<DDims, DimToTransform>
+             ? 1
+             : static_cast<int>(
+                   ddc::select<DDims>(local_restricted).size()))...};
+    MPI_Datatype slice;
+    MPI_Type_contiguous(1, mpi_value_type, &slice);
+    // Last dimension varies fastest, matching DDC's iteration order.
+    for (size_t d = counts.size(); d-- > 0;) {
+      if (counts[d] == 1)
+        continue;
+      MPI_Datatype outer;
+      MPI_Type_create_hvector(counts[d], 1, strides[d], slice, &outer);
+      MPI_Type_free(&slice);
+      slice = outer;
     }
-    return displacements;
+    return slice;
   };
 
-  // Post all sends and receives non-blocking, then wait.
-  // This avoids deadlocks when ranks have different peer orderings.
   std::vector<MPI_Request> requests;
   std::vector<MPI_Datatype> types_to_free;
   requests.reserve(peers.size() * 2);
-  types_to_free.reserve(peers.size() * 2);
+  types_to_free.reserve(peers.size() * 2 + 2);
+  MPI_Datatype send_slice = MPI_DATATYPE_NULL;
+  MPI_Datatype receive_slice = MPI_DATATYPE_NULL;
+  auto build_type = [&](auto const &span, std::vector<DElem1d> const &indices,
+                        MPI_Datatype &slice) {
+    if (slice == MPI_DATATYPE_NULL) {
+      slice = build_slice(span, indices.front());
+      types_to_free.push_back(slice);
+    }
+    std::vector<MPI_Aint> displacements;
+    displacements.reserve(indices.size());
+    for (auto index : indices)
+      displacements.push_back(
+          byte_offset(span, replace_dim(local_restricted.front(), index)));
+    MPI_Datatype type;
+    MPI_Type_create_hindexed_block(static_cast<int>(indices.size()), 1,
+                                   displacements.data(), slice, &type);
+    MPI_Type_commit(&type);
+    types_to_free.push_back(type);
+    return type;
+  };
 
+  // Post all sends and receives before waiting, including one-way peers.
   for (auto &peer : peers) {
-    // Receive type
-    auto recv_displacements =
-        build_displacements(receive_grid, peer.indices_we_need);
-    int recv_count = static_cast<int>(recv_displacements.size());
-    std::vector<int> recv_blocklens(recv_count, 1);
-    MPI_Datatype recv_type;
-    MPI_Type_create_hindexed(recv_count, recv_blocklens.data(),
-                             recv_displacements.data(), mpi_value_type,
-                             &recv_type);
-    MPI_Type_commit(&recv_type);
-    types_to_free.push_back(recv_type);
+    if (peer.indices_we_need.empty())
+      continue;
+    auto const recv_type =
+        build_type(receive_grid, peer.indices_we_need, receive_slice);
 
     MPI_Request req;
     MPI_Irecv(receive_grid.data_handle(), 1, recv_type, peer.remote_rank, 20,
@@ -206,17 +232,10 @@ void exchange_ghost_slices(
   }
 
   for (auto &peer : peers) {
-    // Send type
-    auto send_displacements =
-        build_displacements(local_grid, peer.indices_they_need);
-    int send_count = static_cast<int>(send_displacements.size());
-    std::vector<int> send_blocklens(send_count, 1);
-    MPI_Datatype send_type;
-    MPI_Type_create_hindexed(send_count, send_blocklens.data(),
-                             send_displacements.data(), mpi_value_type,
-                             &send_type);
-    MPI_Type_commit(&send_type);
-    types_to_free.push_back(send_type);
+    if (peer.indices_they_need.empty())
+      continue;
+    auto const send_type =
+        build_type(local_grid, peer.indices_they_need, send_slice);
 
     MPI_Request req;
     MPI_Isend(local_grid.data_handle(), 1, send_type, peer.remote_rank, 20,
@@ -224,9 +243,8 @@ void exchange_ghost_slices(
     requests.push_back(req);
   }
 
-  std::vector<MPI_Status> statuses(requests.size());
   MPI_Waitall(static_cast<int>(requests.size()), requests.data(),
-              statuses.data());
+              MPI_STATUSES_IGNORE);
 
   for (auto &t : types_to_free) {
     MPI_Type_free(&t);
@@ -325,8 +343,7 @@ bool distributed_transform_in(
                               ddc::HostAllocator<value_type>());
       auto const remote = remote_chunk.span_view();
       exchange_ghost_slices<DimToTransform>(peers, local_grid, remote,
-                                            local_restricted,
-                                            local_restricted_1d, cart_comm);
+                                            local_restricted, cart_comm);
       transform(local_grid, remote);
       return true;
     }
@@ -360,8 +377,7 @@ bool distributed_transform_in(
 
   // Exchange ghost hyperplane slices
   exchange_ghost_slices<DimToTransform>(peers, local_grid, extended_span,
-                                        local_restricted, local_restricted_1d,
-                                        cart_comm);
+                                        local_restricted, cart_comm);
 
   transform(extended_span, extended_span);
 

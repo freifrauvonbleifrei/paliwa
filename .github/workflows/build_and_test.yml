@@ -113,7 +113,7 @@ jobs:
           MPI_RUN="mpiexec"
         fi
         cd build
-        $MPI_RUN -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*'
+        $MPI_RUN -n 2 ./test/paliwa_tests --gtest_filter='distributed.classify*:distributed.roundtrip_1d*:distributed.bulk_ghost_slices'
         $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d*:distributed.one_point_per_rank'
         $MPI_RUN -n 4 ./test/paliwa_tests --gtest_filter='combination_technique.distributed*'
         $MPI_RUN -n 8 ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_8ranks*'
@@ -132,7 +132,7 @@ jobs:
         fi
         mkdir -p must_reports
         spack build-env must -- mustrun --must:mpiexec "$MUST_MPIEXEC" --must:np "-n" -n 2 \
-          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat'
+          ./test/paliwa_tests --gtest_filter='distributed.roundtrip_1d_hat:distributed.bulk_ghost_slices'
         grep -q "no MPI usage errors" MUST_Output.html
         spack build-env must -- mustrun --must:mpiexec "mpiexec" --must:np "-n" -n 4 \
           ./test/paliwa_tests --gtest_filter='distributed.roundtrip_2d_all_wavelets'
