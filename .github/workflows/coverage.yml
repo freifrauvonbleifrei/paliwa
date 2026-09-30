@@ -36,7 +36,7 @@ jobs:
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
         spack env create ddc-env
-        spack --env ddc-env add ddc@main -splines -fft -pdi
+        spack --env ddc-env add ddc@=0.16.0 -splines -fft -pdi
         spack --env ddc-env add googletest
         spack --env ddc-env add mpi
         spack --env ddc-env install

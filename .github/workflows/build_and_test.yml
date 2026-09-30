@@ -49,7 +49,7 @@ jobs:
           -o "${BUILTIN_REPO}/packages/must/package.py"
         spack config add "concretizer:unify:when_possible"
         spack env create ddc-env
-        spack --env ddc-env add ddc@main -splines -fft -pdi #...+cuda cuda_arch=...
+        spack --env ddc-env add ddc@=0.16.0 -splines -fft -pdi #...+cuda cuda_arch=...
         spack --env ddc-env add py-pip  # for postprocessing
         spack --env ddc-env add googletest
         if [ "${{ matrix.mpi }}" == "yes" ]; then
