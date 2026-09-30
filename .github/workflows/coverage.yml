@@ -35,6 +35,10 @@ jobs:
         spack external find
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
+        # Spack 1.1.1's recipe snapshot predates DDC 0.16.0.
+        BUILTIN_REPO=$(spack location --repo builtin)
+        curl -fsSL https://raw.githubusercontent.com/spack/spack-packages/3db6f365099b9e557e81ef3909d20118364689ba/repos/spack_repo/builtin/packages/ddc/package.py \
+          -o "${BUILTIN_REPO}/packages/ddc/package.py"
         spack env create ddc-env
         spack --env ddc-env add ddc@=0.16.0 -splines -fft -pdi
         spack --env ddc-env add googletest
