@@ -42,12 +42,9 @@ jobs:
         spack config add "packages:cmake:buildable:false"
         spack config add "packages:python:buildable:false"
         GCC_FULL_VER=$(gcc -dumpfullversion)
-        BUILTIN_REPO=$(spack location --repo builtin)
-        # Spack 1.1.1's recipe snapshot predates DDC 0.16.0.
-        curl -fsSL https://raw.githubusercontent.com/spack/spack-packages/3db6f365099b9e557e81ef3909d20118364689ba/repos/spack_repo/builtin/packages/ddc/package.py \
-          -o "${BUILTIN_REPO}/packages/ddc/package.py"
         # Overlay patched MUST package
         # TODO remove once upstreamed
+        BUILTIN_REPO=$(spack location --repo builtin)
         curl -fsSL https://raw.githubusercontent.com/freifrauvonbleifrei/spack-packages/update_must_package/repos/spack_repo/builtin/packages/must/package.py \
           -o "${BUILTIN_REPO}/packages/must/package.py"
         spack config add "concretizer:unify:when_possible"
