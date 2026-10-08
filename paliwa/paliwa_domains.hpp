@@ -13,6 +13,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace paliwa {
@@ -28,6 +29,75 @@ constexpr auto replace_dim(ddc::DiscreteElement<DDims...> base,
       return ddc::select<DDims>(base);
     }
   }()...);
+}
+
+// Physical offsets for one transverse axis (or several merged axes).
+// Irregular sparse selections retain a small axis lookup instead of assuming
+// that coordinate strides imply constant memory strides.
+struct PoleAxis {
+  size_t count;
+  std::ptrdiff_t stride;
+  std::vector<std::ptrdiff_t> offsets;
+
+  std::ptrdiff_t operator()(size_t i) const {
+    return offsets.empty() ? static_cast<std::ptrdiff_t>(i) * stride
+                           : offsets[i];
+  }
+};
+
+template <typename Span, typename Element, typename... Dims>
+std::vector<PoleAxis>
+make_pole_layout(Span source, ddc::StridedDiscreteDomain<Dims...> const &poles,
+                 Element anchor) {
+  std::vector<PoleAxis> layout;
+  auto append = [&]<typename Dim>() {
+    auto const axis = ddc::select<Dim>(poles);
+    if (axis.size() <= 1)
+      return;
+    PoleAxis part{axis.size(), 0, {}};
+    auto const origin = &source(anchor);
+    part.stride =
+        &source(replace_dim(anchor, axis.front() + axis.strides())) - origin;
+    bool regular = true;
+    if constexpr (ddc::is_sparse_discrete_domain_v<
+                      typename Span::discrete_domain_type>) {
+      // A proper subset of a sparse axis can have irregular storage offsets.
+      if (ddc::select<Dim>(source.domain()).size() != axis.size()) {
+        part.offsets.reserve(part.count);
+        ddc::host_for_each(axis, [&](auto i) {
+          part.offsets.push_back(&source(replace_dim(anchor, i)) - origin);
+        });
+        for (size_t i = 0; i < part.count; ++i)
+          regular &=
+              part.offsets[i] == static_cast<std::ptrdiff_t>(i) * part.stride;
+      }
+    }
+    if (regular) {
+      part.offsets.clear();
+      if (!layout.empty() && layout.back().offsets.empty() &&
+          layout.back().stride ==
+              static_cast<std::ptrdiff_t>(part.count) * part.stride) {
+        layout.back().count *= part.count;
+        layout.back().stride = part.stride;
+        return;
+      }
+    }
+    layout.push_back(std::move(part));
+  };
+  (append.template operator()<Dims>(), ...);
+  return layout;
+}
+
+inline std::ptrdiff_t pole_offset(std::vector<PoleAxis> const &layout,
+                                  size_t pole) {
+  std::ptrdiff_t offset = 0;
+  for (size_t d = layout.size(); d-- > 0;) {
+    auto const i = d == 0 ? pole : pole % layout[d].count;
+    offset += layout[d](i);
+    if (d != 0)
+      pole /= layout[d].count;
+  }
+  return offset;
 }
 
 template <typename... DDims>
@@ -172,7 +242,7 @@ constexpr ddc::DiscreteVector<HeadTag, Tags...> get_intersected_extent(
     ddc::DiscreteVector<HeadTag, Tags...> const &strided_extents,
     ddc::DiscreteElement<OtherTags...> const &other_back) {
   ddc::DiscreteVector<HeadTag> head_result;
-  if constexpr (ddc::in_tags_v<HeadTag, ddc::detail::TypeSeq<OtherTags...>>) {
+  if constexpr ((std::is_same_v<HeadTag, OtherTags> || ...)) {
     ddc::detail::array(head_result) = {(ddc::select<HeadTag>(other_back) -
                                         ddc::select<HeadTag>(strided_begin)) /
                                            strides.template get<HeadTag>() +

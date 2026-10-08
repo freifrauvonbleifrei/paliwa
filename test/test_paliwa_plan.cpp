@@ -427,3 +427,64 @@ TEST(transform_plan, packed_pass_index_range) {
                                           std::numeric_limits<int>::digits, 1),
                std::invalid_argument);
 }
+
+struct LayoutAxis {};
+struct LayoutDim : ddc::UniformPointSampling<LayoutAxis> {};
+
+TEST(transform_plan, linear_pole_layout) {
+  using Element = ddc::DiscreteElement<PlanDim, PoleDim, LayoutDim>;
+  using Vector = ddc::DiscreteVector<PlanDim, PoleDim, LayoutDim>;
+  using Domain = ddc::StridedDiscreteDomain<PlanDim, PoleDim, LayoutDim>;
+  Domain storage(Element(10, 20, 30), Vector(4, 5, 6), Vector(2, 3, 4));
+  ddc::Chunk chunk(storage, ddc::HostAllocator<double>());
+  auto grid = chunk.span_view();
+  auto check = [&]<typename Dim>(Domain selected) {
+    auto poles = ddc::remove_dims_of<Dim>(selected);
+    auto anchor = selected.front();
+    auto layout = paliwa::make_pole_layout(grid, poles, anchor);
+    size_t ordinal = 0;
+    ddc::host_for_each(poles, [&](auto pole) {
+      auto element = Element(pole, ddc::select<Dim>(anchor));
+      EXPECT_EQ(paliwa::pole_offset(layout, ordinal++),
+                &grid(element) - &grid(anchor));
+    });
+    if (selected == storage)
+      EXPECT_EQ(layout.size(), (std::is_same_v<Dim, PoleDim> ? 2u : 1u));
+  };
+  for (auto selected :
+       {storage, Domain(Element(12, 23, 34), Vector(2, 2, 2), Vector(2, 6, 8)),
+        Domain(Element(12, 23, 34), Vector(1, 1, 1), Vector(2, 3, 4))}) {
+    check.template operator()<PlanDim>(selected);
+    check.template operator()<PoleDim>(selected);
+    check.template operator()<LayoutDim>(selected);
+  }
+}
+
+TEST(transform_plan, linear_pole_sparse_subset) {
+  using Element = ddc::DiscreteElement<PlanDim, PoleDim>;
+  using Vector = ddc::DiscreteVector<PlanDim, PoleDim>;
+  Kokkos::View<ddc::DiscreteElement<PlanDim> *, Kokkos::SharedSpace> x("x", 2);
+  x(0) = ddc::DiscreteElement<PlanDim>(0);
+  x(1) = ddc::DiscreteElement<PlanDim>(1);
+  Kokkos::View<ddc::DiscreteElement<PoleDim> *, Kokkos::SharedSpace> y("y", 7);
+  int const coordinates[] = {0, 1, 2, 3, 4, 7, 8};
+  for (size_t i = 0; i < 7; ++i)
+    y(i) = ddc::DiscreteElement<PoleDim>(coordinates[i]);
+  ddc::SparseDiscreteDomain<PlanDim, PoleDim> domain{
+      ddc::SparseDiscreteDomain<PlanDim>(x),
+      ddc::SparseDiscreteDomain<PoleDim>(y)};
+  ddc::Chunk chunk(domain, ddc::HostAllocator<double>());
+  auto grid = chunk.span_view();
+  ddc::StridedDiscreteDomain<PlanDim, PoleDim> selected(
+      Element(0, 0), Vector(2, 3), Vector(1, 4));
+  auto poles = ddc::remove_dims_of<PlanDim>(selected);
+  auto layout = paliwa::make_pole_layout(grid, poles, selected.front());
+  ASSERT_EQ(layout.size(), 1u);
+  EXPECT_FALSE(layout[0].offsets.empty());
+  size_t ordinal = 0;
+  ddc::host_for_each(poles, [&](auto pole) {
+    EXPECT_EQ(paliwa::pole_offset(layout, ordinal++),
+              &grid(Element(ddc::DiscreteElement<PlanDim>(0), pole)) -
+                  grid.data_handle());
+  });
+}

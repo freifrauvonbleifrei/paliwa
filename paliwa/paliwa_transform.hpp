@@ -126,27 +126,14 @@ void transform_packed_poles(
       };
       std::vector<Offset> offsets;
       offsets.reserve(indices.size());
-      long const first = indices.empty() ? 0 : indices.front();
-      std::ptrdiff_t anchor_offset = 0;
-      if (!indices.empty()) {
-        auto const anchor = poles.front();
-        anchor_offset =
-            &source(Element(anchor, ddc::DiscreteElement<Dim>(first))) -
-            source.data_handle();
-        for (long x : indices)
-          offsets.push_back(
-              {&source(Element(anchor, ddc::DiscreteElement<Dim>(x))) -
-                   source.data_handle(),
-               slot(x)});
-      }
-      return [=, offsets = std::move(offsets)](auto pole, int buffer,
-                                               bool scatter) {
-        if (offsets.empty())
-          return;
-        auto const data = source.data_handle();
-        auto const base =
-            &source(Element(pole, ddc::DiscreteElement<Dim>(first))) - data -
-            anchor_offset;
+      for (long x : indices)
+        offsets.push_back(
+            {&source(Element(poles.front(), ddc::DiscreteElement<Dim>(x))) -
+                 source.data_handle(),
+             slot(x)});
+      auto const data = source.data_handle();
+      return [data, buffers, offsets = std::move(offsets)](
+                 std::ptrdiff_t base, int buffer, bool scatter) {
         if (scatter) {
           for (auto const &offset : offsets)
             data[base + offset.source] = buffers(buffer, offset.scratch);
@@ -167,19 +154,31 @@ void transform_packed_poles(
     ddc::host_for_each(output_axis, [&](auto x) {
       output_indices.push_back(x.template uid<Dim>());
     });
+    auto const local_layout = make_pole_layout(
+        grid, poles, Element(poles.front(), output_axis.front()));
+    std::vector<PoleAxis> remote_layout;
+    if (!remote_inputs.empty())
+      remote_layout = make_pole_layout(
+          remote_grid, poles,
+          Element(poles.front(),
+                  ddc::DiscreteElement<Dim>(remote_inputs.front())));
     auto const gather_local = make_copy(grid, local_inputs);
     auto const gather_remote = make_copy(remote_grid, remote_inputs);
     auto const scatter_local = make_copy(grid, output_indices);
-    ddc::parallel_for_each(instance, poles, [&](auto pole) {
-      int const buffer = tokens.acquire();
-      gather_local(pole, buffer, false);
-      gather_remote(pole, buffer, false);
-      for (size_t l = 0; l < levels.size(); ++l)
-        for (size_t p = 0; p < lifting_passes.size(); ++p)
-          apply_pass(buffer, l, p);
-      scatter_local(pole, buffer, true);
-      tokens.release(buffer);
-    });
+    Kokkos::parallel_for(
+        Kokkos::RangePolicy<ExecSpace, Kokkos::IndexType<size_t>>(instance, 0,
+                                                                  poles.size()),
+        [&](size_t pole) {
+          int const buffer = tokens.acquire();
+          auto const local_base = pole_offset(local_layout, pole);
+          gather_local(local_base, buffer, false);
+          gather_remote(pole_offset(remote_layout, pole), buffer, false);
+          for (size_t l = 0; l < levels.size(); ++l)
+            for (size_t p = 0; p < lifting_passes.size(); ++p)
+              apply_pass(buffer, l, p);
+          scatter_local(local_base, buffer, true);
+          tokens.release(buffer);
+        });
     // Copy plans must outlive all uses by the execution space.
     instance.fence();
   } else {
